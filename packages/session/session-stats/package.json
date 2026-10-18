@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-session-stats",
-  "description": "Whole-log conversation counts and wall times projection (sessionStats) for the DeepSeek Harness",
+  "description": "Whole-log conversation counts and wall times projection (sessionStats) for the FustAI Harness",
   "version": "0.2.1-alpha.4",
   "publishConfig": {
     "access": "public"

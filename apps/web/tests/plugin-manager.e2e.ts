@@ -694,9 +694,9 @@ describe('web e2e: plugin manager', () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-plugin-manager-preview'))
     const panel = await openPluginsPanel()
     await panel.getByRole('button', { name: '更多', exact: true }).click()
-    await panel.getByRole('button', { name: '查看 DSH 徽章技能', exact: true }).click()
+    await panel.getByRole('button', { name: '查看 Fsh 徽章技能', exact: true }).click()
     const detail = panel.locator('[data-plugin-detail]')
-    const preview = detail.getByRole('img', { name: 'DSH 徽章技能功能预览', exact: true })
+    const preview = detail.getByRole('img', { name: 'Fsh 徽章技能功能预览', exact: true })
     await preview.waitFor()
     await preview.evaluate(async (image: HTMLImageElement) => { await image.decode() })
     expect(await preview.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(640)
@@ -716,7 +716,7 @@ describe('web e2e: plugin manager', () => {
     const chineseSource = await preview.getAttribute('src')
     try {
       await setLanguage('en')
-      const englishPreview = detail.getByRole('img', { name: 'DSH badge skill feature preview', exact: true })
+      const englishPreview = detail.getByRole('img', { name: 'Fsh badge skill feature preview', exact: true })
       await englishPreview.waitFor()
       await englishPreview.evaluate(async (image: HTMLImageElement) => { await image.decode() })
       expect(await englishPreview.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(640)
@@ -1031,13 +1031,13 @@ describe('web e2e: plugin manager', () => {
     const install = dialog.getByRole('button', { name: '安装', exact: true })
     expect(await install.isDisabled()).toBe(true)
     expect(await dialog.getByRole('note').textContent()).toContain('请确认插件来源可信')
-    expect(await dialog.getByRole('note').textContent()).toContain('按需安装的官方插件会在版本与 DSH 不同时提供“更新”')
+    expect(await dialog.getByRole('note').textContent()).toContain('按需安装的官方插件会在版本与 FustAI 不同时提供“更新”')
     expect(await dialog.getByRole('note').textContent()).toContain('其他插件请先卸载再安装新版')
     await dialog.getByRole('button', { name: '插件安装引导和示例' }).click()
     // The guide carries the package-name example only; the former template strings keep their replacement reminder.
     await expect.poll(() => dialog.getByRole('listitem').count()).toBe(1)
-    await dialog.getByRole('button', { name: '填入示例 dsh-plugin-whale-pet' }).click()
-    expect(await field.inputValue()).toBe('dsh-plugin-whale-pet')
+    await dialog.getByRole('button', { name: '填入示例 dsh-plugin-weather-now' }).click()
+    expect(await field.inputValue()).toBe('dsh-plugin-weather-now')
     expect(await dialog.getByRole('status').count()).toBe(0)
     for (const [example, hint] of [
       ['https://github.com/author/dsh-plugin', '请替换为实际的 Git 仓库地址'],
@@ -1146,7 +1146,7 @@ describe('web e2e: startup-applied plugin management', () => {
       // The selection is saved and the switch turns on, but nothing mounts before the next start; a toast says so.
       await expect.poll(bundles, { timeout: PLUGIN_TOGGLE_SETTLE_MS }).toEqual([...SCAFFOLD_BUNDLES, '@fixture/bundle'])
       await expect.poll(() => toggle.getAttribute('aria-checked'), { timeout: PLUGIN_TOGGLE_SETTLE_MS }).toBe('true')
-      await page.getByText('请重启 DSH 使更改生效。这个 profile 只在启动时应用更改。', { exact: true }).waitFor({ timeout: 10_000 })
+      await page.getByText('请重启 FustAI 使更改生效。这个 profile 只在启动时应用更改。', { exact: true }).waitFor({ timeout: 10_000 })
       expect(mounted()?.fiber?.state).toBeUndefined()
       // The pack's page lists its rows from their declarations, with no live entry to switch.
       await panel.getByRole('button', { name: '查看 @fixture/bundle' }).click()

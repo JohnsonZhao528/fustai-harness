@@ -173,7 +173,7 @@ describe.skipIf(!existsSync(join(root, 'apps/cli/lib/bin.js')))('Official option
     expect(names()).toEqual(['working_directory'])
     expect(names(minimal.agent)).toEqual([process.platform === 'win32' ? 'pwsh' : 'bash', 'read_image', 'working_directory'])
     for (const name of ['str_replace_editor', 'session_search', 'terminal_open', 'ralph']) expect(names(standard.agent)).not.toContain(name)
-    expect((await ctx.skills.list({ cwd: workspace, scope: standard.agent })).some(skill => skill.name === 'dsh-badge')).toBe(false)
+    expect((await ctx.skills.list({ cwd: workspace, scope: standard.agent })).some(skill => skill.name === 'fsh-badge')).toBe(false)
   })
 
   it('generates and executes the PTC SDK for the selected search bundle', async () => {
@@ -233,18 +233,18 @@ describe.skipIf(!existsSync(join(root, 'apps/cli/lib/bin.js')))('Official option
   it('loads the actual badge asset only while its bundle is selected', async () => {
     const owner = await agent()
     const load = (callId: string) => ctx.tools.execute({
-      callId: ToolCallId(callId), name: 'skill', arguments: { name: 'dsh-badge' },
+      callId: ToolCallId(callId), name: 'skill', arguments: { name: 'fsh-badge' },
       agent: owner.agent, signal: new AbortController().signal,
     })
     expect((await load('badge-before')).isError).toBe(true)
     await select(bundles.badge, true)
-    await turn(owner.agent, 'Load the dsh badge skill.', [
-      toolCallResponse('badge-on', 'skill', { name: 'dsh-badge' }), textResponse('BADGE_DONE'),
+    await turn(owner.agent, 'Load the fsh badge skill.', [
+      toolCallResponse('badge-on', 'skill', { name: 'fsh-badge' }), textResponse('BADGE_DONE'),
     ])
-    expect(toolResult(owner.agent, 'badge-on')).toContain('powered by dsh')
-    expect(toolResult(owner.agent, 'badge-on')).toContain('dsh-badge.png')
+    expect(toolResult(owner.agent, 'badge-on')).toContain('powered by fsh')
+    expect(toolResult(owner.agent, 'badge-on')).toContain('fsh-badge.png')
     const minimal = await agent('minimal')
-    expect((await ctx.skills.list({ cwd: workspace, scope: minimal.agent })).map(skill => skill.name)).toContain('dsh-badge')
+    expect((await ctx.skills.list({ cwd: workspace, scope: minimal.agent })).map(skill => skill.name)).toContain('fsh-badge')
     expect(names(minimal.agent)).toEqual([process.platform === 'win32' ? 'pwsh' : 'bash', 'read_image', 'working_directory'])
     await select(bundles.badge, false)
     expect((await load('badge-after')).isError).toBe(true)
@@ -337,12 +337,12 @@ describe.skipIf(!existsSync(join(root, 'apps/cli/lib/bin.js')))('Official option
     if (coded === undefined) throw new Error('the PTC Agent was not created')
     await turn(coded, 'Read this session lineage and load the badge through one program.', [
       toolCallResponse('combined-program', 'run_code', {
-        code: 'console.log(await tools.session_trace({})); console.log(await tools.skill({ name: "dsh-badge" }));',
+        code: 'console.log(await tools.session_trace({})); console.log(await tools.skill({ name: "fsh-badge" }));',
         description: 'Use optional session search and badge together',
       }), textResponse('COMBINED_DONE'),
     ])
     expect(toolResult(coded, 'combined-program')).toContain(coded.session.id)
-    expect(toolResult(coded, 'combined-program')).toContain('dsh-badge')
+    expect(toolResult(coded, 'combined-program')).toContain('fsh-badge')
     expect(names()).toEqual(expect.arrayContaining(['session_search', 'terminal_open', 'ralph', 'working_directory']))
     for (const name of [...Object.values(bundles)].reverse()) await select(name, false)
     expect(names((await agent()).agent)).not.toContain('session_search')

@@ -11,17 +11,29 @@ type ExecFileMock = (
   callback: ExecFileCallback,
 ) => void
 
-const { execFileMock } = vi.hoisted(() => ({ execFileMock: vi.fn<ExecFileMock>() }))
+/** Child handle the detached launcher subscribes to and releases. */
+type SpawnChild = EventEmitter & { unref(): void }
+type SpawnMock = (
+  command: string,
+  args: readonly string[],
+  options: { detached: boolean; stdio: string },
+) => SpawnChild
 
-vi.mock('node:child_process', () => ({ execFile: execFileMock }))
+const { execFileMock, spawnMock } = vi.hoisted(() => ({
+  execFileMock: vi.fn<ExecFileMock>(),
+  spawnMock: vi.fn<SpawnMock>(),
+}))
 
+vi.mock('node:child_process', () => ({ execFile: execFileMock, spawn: spawnMock }))
+
+import { EventEmitter } from 'node:events'
 import { release as osRelease } from 'node:os'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { canOpenNativePath, nativeFileManager, revealNativePath, openNativeAssociatedPath, openNativePath, openNativeTextFile, type PathOpenerRunner } from '../src/index.ts'
+import { canOpenNativePath, nativeFileManager, revealNativePath, openNativeAssociatedPath, openNativePath, openNativeTextFile, type DetachedCommandLauncher, type PathOpenerRunner } from '../src/index.ts'
 
 const signal = () => new AbortController().signal
 
-beforeEach(() => { execFileMock.mockReset() })
+beforeEach(() => { execFileMock.mockReset(); spawnMock.mockReset() })
 
 describe('native path opener', () => {
   it('opens with macOS open(1)', async () => {
@@ -137,14 +149,17 @@ describe('native path opener', () => {
     )
   })
 
-  it('uses the Windows desktop association for text documents', async () => {
+  it('launches Notepad for Windows text documents instead of the association', async () => {
     const run = vi.fn<PathOpenerRunner>(async () => ({ stdout: '', stderr: '' }))
-    await openNativeTextFile('C:\\work\\settings.yaml', signal(), { platform: 'win32', run })
-    expect(run).toHaveBeenCalledWith(
-      'explorer.exe',
-      ['file:///C:/work/settings.yaml'],
-      expect.any(AbortSignal),
-      'visible',
+    const launch = vi.fn<DetachedCommandLauncher>(async () => {})
+    await openNativeTextFile('C:\\work\\settings.yaml', signal(), {
+      platform: 'win32', run, launchDetached: launch,
+    })
+    // A broken association (a handler missing a runtime DLL) fails in Explorer;
+    // the edit gesture never reaches it.
+    expect(run).not.toHaveBeenCalled()
+    expect(launch).toHaveBeenCalledWith(
+      'notepad.exe', ['C:\\work\\settings.yaml'], expect.any(AbortSignal),
     )
   })
 
@@ -218,6 +233,38 @@ describe('native path opener', () => {
       message: 'open failed', cause: commandError, code: 1,
       stdout: 'partial output', stderr: 'failure details',
     })
+  })
+})
+
+describe('Windows text-editor hand-off through the default launcher', () => {
+  it('resolves once Notepad spawns and releases it from the event loop', async () => {
+    const child = Object.assign(new EventEmitter(), { unref: vi.fn() })
+    spawnMock.mockImplementation(() => {
+      queueMicrotask(() => child.emit('spawn'))
+      return child
+    })
+    await openNativeTextFile('C:\\work\\settings.yaml', signal(), { platform: 'win32' })
+    expect(spawnMock).toHaveBeenCalledWith(
+      'notepad.exe', ['C:\\work\\settings.yaml'], { detached: true, stdio: 'ignore' },
+    )
+    expect(child.unref).toHaveBeenCalledOnce()
+  })
+
+  it('rejects with the spawn failure when Notepad cannot start', async () => {
+    const child = Object.assign(new EventEmitter(), { unref: vi.fn() })
+    spawnMock.mockImplementationOnce(() => {
+      queueMicrotask(() => child.emit('error', new Error('spawn notepad.exe ENOENT')))
+      return child
+    })
+    await expect(openNativeTextFile('C:\\work\\settings.yaml', signal(), { platform: 'win32' }))
+      .rejects.toThrow('spawn notepad.exe ENOENT')
+    expect(child.unref).not.toHaveBeenCalled()
+  })
+
+  it('refuses to launch Notepad when the request is already aborted', async () => {
+    await expect(openNativeTextFile('C:\\work\\settings.yaml', AbortSignal.abort(new Error('cancelled')), { platform: 'win32' }))
+      .rejects.toThrow('cancelled')
+    expect(spawnMock).not.toHaveBeenCalled()
   })
 })
 

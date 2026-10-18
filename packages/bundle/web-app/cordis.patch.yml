@@ -44,19 +44,19 @@
 - insert:
     - id: desktop-product-telemetry
       name: '@deepseek-ai/dsh-host-product-telemetry-otel'
-      disabled: !!js "ctx.get('profileContext')?.name !== 'desktop'"
+      disabled: true
       config:
         scheduledDelayMillis: 30000
         timeoutMillis: 15000
         exportTimeoutMillis: 20000
         shutdownTimeoutMillis: 2000
-        serviceName: deepseek-harness-desktop
+        serviceName: fustai-harness-desktop
         serviceVersion: !!js process.env.DSH_CLIENT_VERSION
         endpoint: !!js process.env.DSH_PRODUCT_ANALYTICS_OTLP_URL
 
     - id: product-analytics
       name: '@deepseek-ai/dsh-client-product-analytics'
-      disabled: !!js "ctx.get('profileContext')?.name !== 'desktop'"
+      disabled: true
       config:
         enabled: true
         appVersion: !!js process.env.DSH_CLIENT_VERSION
@@ -65,11 +65,6 @@
     # delegation tools. The Plugins page edits this settings namespace.
     - id: subagent-model-selection-settings
       name: '@deepseek-ai/dsh-tool-subagent/model-selection-settings'
-
-    - id: message-feedback
-      name: '@deepseek-ai/dsh-message-feedback'
-      config:
-        maxNoteBytes: 8192
 
     # Browser Session export: `/export` command plus the shared download dialog.
     - id: session-log-download
@@ -141,12 +136,6 @@
 
     # Configuration-surface reads and writes over Typert Remote. Each method
     # reports an actionable error when its settings-domain provider is absent.
-    - id: ui-settings-account
-      name: '@deepseek-ai/dsh-client-ui-settings-account'
-
-    - id: account-controller
-      name: '@deepseek-ai/dsh-api-account-controller'
-
     - id: settings-controller
       name: '@deepseek-ai/dsh-api-settings-controller'
 
@@ -401,12 +390,6 @@
     # Goal surface: GoalBar in the input dock over the goal session projection.
     - id: ui-goal
       name: '@deepseek-ai/dsh-client-ui-goal'
-
-    # The feedback surface: Like/Dislike in the assistant-message action
-    # strip, the feedback dialog behind Dislike and /feedback with its
-    # acknowledgement toast, over the messageFeedback and sessionFeedback Remotes.
-    - id: ui-message-feedback
-      name: '@deepseek-ai/dsh-client-ui-message-feedback'
 
     # Model selection: the /model popupSelect + composer seat over session.models.
     - id: ui-model-selection

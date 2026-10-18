@@ -1,6 +1,6 @@
 {
-  "name": "DeepSeek Harness",
-  "short_name": "DSH",
+  "name": "FustAI Harness",
+  "short_name": "FustAI",
   "start_url": "./",
   "scope": "./",
   "display": "fullscreen",

@@ -3,41 +3,41 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/experimental/skill-badge/README.md
 /:
-  en: c32f79a869ebd48a
-  zh: 44e64fb59fa75e57
+  en: bf46db16955e0c82
+  zh: ca5618aab75b8989
 /deepseek-ai-dsh-skill-badge:
   en: 2e49dd1b621b834d
   zh: 1eb37e3b23098c77
 /deepseek-ai-dsh-skill-badge/summary:
-  en: 49bdd760ee9e4370
-  zh: 2a4e68a7ef28d3e6
+  en: 109c3c7ca900dadc
+  zh: fb918463c8ce01e5
 /deepseek-ai-dsh-skill-badge/table-of-contents:
   en: d152484eb41ac6b4
   zh: 09388d293f9be9cb
 /deepseek-ai-dsh-skill-badge/use-this-package:
-  en: 0da087eb29c565b0
-  zh: ec86044ef1255440
+  en: a045826d0765e20a
+  zh: 2ac3e7744cc2ae43
 /deepseek-ai-dsh-skill-badge/use-this-package/when-to-choose-it:
-  en: 4e424f3ab2a8b5b1
-  zh: e38162f15f0a8354
+  en: 7406e86d53cb8f95
+  zh: 4fd2ac3795d6b10c
 /deepseek-ai-dsh-skill-badge/use-this-package/enable-the-plugin:
-  en: a52d308db24e47bc
-  zh: 4e79dae8fa75e484
+  en: 355d885940c1cb08
+  zh: 340ab6e120515700
 /deepseek-ai-dsh-skill-badge/use-this-package/what-the-badge-skill-provides:
-  en: 7144db5613266a9b
-  zh: d1b7edf6c1253e9a
+  en: 98138bcea433f788
+  zh: a53fa88a93cde744
 /deepseek-ai-dsh-skill-badge/use-this-package/observable-success-and-failures:
-  en: dd749b384f657fa8
-  zh: d2ab3f5adf29bd33
+  en: 1da1d74d5c9d2edb
+  zh: 7fdd52b6315e776d
 /deepseek-ai-dsh-skill-badge/understand-the-implementation:
   en: 63465b0133f30e85
   zh: 84bebb7c1fe0ceba
 /deepseek-ai-dsh-skill-badge/understand-the-implementation/design-concept:
-  en: 52ff92fad6d26ee9
-  zh: 071c7859c158513d
+  en: ee09ee7bda74ea62
+  zh: 5be4be0990dfa3e0
 /deepseek-ai-dsh-skill-badge/understand-the-implementation/source-map:
-  en: 259b9b2073da8ddd
-  zh: e0d621f0a3b0470c
+  en: 38e9758225c63785
+  zh: 85c8b15c482e0906
 /deepseek-ai-dsh-skill-badge/further-exploration:
   en: 1b5434b8bcbd5b0b
   zh: d170cddf3837e655
@@ -48,8 +48,8 @@
   en: 5b5bcb4fc0513bef
   zh: 67a1d939c6a18c2e
 /deepseek-ai-dsh-skill-badge/known-limitations-and-deferred-work:
-  en: c7e405ebbc1d4602
-  zh: 05a57fb4359da265
+  en: 1842a02b21c6a185
+  zh: 2203e52de9646289
 /deepseek-ai-dsh-skill-badge/known-limitations-and-deferred-work/dev-note:
   en: e67f633dc6fe7773
   zh: 3bb0c20c93f16f98

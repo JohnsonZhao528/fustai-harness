@@ -19,8 +19,8 @@ it.each(['mac-arm64', 'win-x64'] as const)('retains the complete %s release with
   await writeFile(join(appRoot, 'package.json'), '{"version":"1.0.0"}')
   await writeFile(join(config, 'presets/test.env'), `DSH_DESKTOP_AUTO_UPDATE_ENV=test\nDOWNLOAD_TEST_RELEASE_ID=${'a'.repeat(32)}\n`)
   const names = target === 'win-x64'
-    ? ['deepseek-harness-1.0.0-win-x64.exe', 'deepseek-harness-1.0.0-win-x64.exe.blockmap', 'win-x64-release.json', 'nightly.yml']
-    : ['deepseek-harness-1.0.0-mac-arm64.dmg', 'deepseek-harness-1.0.0-mac-arm64.zip', 'deepseek-harness-1.0.0-mac-arm64.zip.blockmap', 'mac-arm64-release.json', 'nightly-mac.yml']
+    ? ['fustai-harness-1.0.0-win-x64.exe', 'fustai-harness-1.0.0-win-x64.exe.blockmap', 'win-x64-release.json', 'nightly.yml']
+    : ['fustai-harness-1.0.0-mac-arm64.dmg', 'fustai-harness-1.0.0-mac-arm64.zip', 'fustai-harness-1.0.0-mac-arm64.zip.blockmap', 'mac-arm64-release.json', 'nightly-mac.yml']
   await Promise.all(names.map(name => writeFile(join(artifacts, name), 'fixture')))
   const env = {
     DSH_PACKAGING_CONFIG_DIR: config, DSH_PACKAGING_PRESET: 'test', DSH_DESKTOP_TARGET_PLATFORM: target === 'win-x64' ? 'win32' : 'darwin',

@@ -90,8 +90,8 @@
     - id: agent-default-model
       name: '@deepseek-ai/dsh-agent-default-model'
       config:
-        provider: deepseek-official
-        model: deepseek-flash
+        provider: deepseek
+        model: deepseek-chat
 
     - id: jobs
       name: '@deepseek-ai/dsh-jobs-local'
@@ -116,11 +116,6 @@
     # managed document, which is never materialized into the process environment.
     - id: authorization
       name: '@deepseek-ai/dsh-authorization'
-
-    - id: deepseek-account
-      name: '@deepseek-ai/dsh-deepseek-account-platform'
-      config:
-        desktopPlatform: !!js "ctx.get('profileContext')?.name === 'desktop' && ['darwin', 'win32'].includes(process.platform) ? process.platform : null"
 
     - id: credentials
       name: '@deepseek-ai/dsh-credentials-local'
@@ -202,6 +197,9 @@
     - id: otel
       name: '@deepseek-ai/dsh-otel'
 
+    # FustAI ships this row disabled. The config below takes effect only when
+    # a deployment removes `disabled: true` and points
+    # DSH_TELEMETRY_OTLP_URL at its own collector endpoint.
     # OTel releases a Session-log prefix only after explicit user feedback,
     # regardless of model provider. Ordinary activity never triggers capture.
     # DSH_TELEMETRY_OTLP_URL overrides the production endpoint. A non-empty
@@ -217,6 +215,7 @@
     # Every CLI exit path drains by disposing the root on SIGINT/SIGTERM.
     - id: session-telemetry-otel
       name: '@deepseek-ai/dsh-session-telemetry-otel'
+      disabled: true
       config:
         mode: !!js process.env.DSH_TELEMETRY_MODE || 'FEEDBACK_ONLY'
         shutdownTimeoutMillis: 3000
@@ -316,9 +315,6 @@
 
     - id: commands
       name: '@deepseek-ai/dsh-commands'
-
-    - id: command-feedback
-      name: '@deepseek-ai/dsh-command-feedback'
 
     - id: goal
       name: '@deepseek-ai/dsh-goal'
@@ -510,13 +506,3 @@
     # overlay can pin another workspace.
     - id: fs-sandbox
       name: '@deepseek-ai/dsh-fs-sandbox'
-
-    # The native DeepSeek adapter. No key or endpoint is inlined: both resolve per
-    # request from the `llm-deepseek:` settings section over this entry, with the
-    # key coming from the credential store below. Thinking defaults are a deployment
-    # choice.
-    - id: llm-deepseek
-      name: '@deepseek-ai/dsh-llm-deepseek-api-key'
-
-    - id: llm-deepseek-account
-      name: '@deepseek-ai/dsh-llm-deepseek-account'

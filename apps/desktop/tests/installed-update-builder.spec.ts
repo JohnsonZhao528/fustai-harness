@@ -98,7 +98,7 @@ describe('installed-update application inputs and builder configuration', () => 
         expect(typeof config.beforeBuild).toBe('function')
         expect(config.nsis.include).toMatch(/scripts[\\/]installer\.nsh$/u)
         expect(config.publish[0]!.url)
-          .toMatch(/^https:\/\/download-test\.deepseek\.com\/dsh-desk\/feeds\/qualification\/[a-f0-9]{24}\/win-x64\/$/u)
+          .toMatch(/^https:\/\/download-test\.deepseek\.com\/fustai-desk\/feeds\/qualification\/[a-f0-9]{24}\/win-x64\/$/u)
       }
     })
   })
@@ -115,7 +115,7 @@ describe('installed-update application inputs and builder configuration', () => 
   it.each([
     { DSH_DESKTOP_AUTO_UPDATE_ENV: 'production' },
     { DSH_DESKTOP_UNSIGNED: '1' },
-    { DOWNLOAD_TEST_ORIGIN: 'https://download.deepseek.com' },
+    { DOWNLOAD_TEST_ORIGIN: 'https://update.fustai.com' },
   ])('rejects incompatible qualification settings %j', async (override) => {
     await fixture(async (manifest) => {
       await expect(createInstalledUpdateBuilderConfig(manifest, versions[0], { ...environment, ...override })).rejects.toThrow('test deployment')

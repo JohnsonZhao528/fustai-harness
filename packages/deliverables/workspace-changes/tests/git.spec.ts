@@ -86,7 +86,8 @@ describe('snapshots and diffs', () => {
     const { git: runnerGit } = await runner()
     const store = objectsIn(await scratchDir('dsh-git-store-', cleanups))
     expect(await locateGitWorkspace(runnerGit, cwd, store, signal)).toBeNull()
-    const broken = { root: cwd, gitDir: join(cwd, 'missing'), scratch: cwd, env: {}, excludes: [] }
+    // GIT_DIR names a missing directory so git fails fast instead of discovering an enclosing repository.
+    const broken = { root: cwd, gitDir: join(cwd, 'missing'), scratch: cwd, env: { GIT_DIR: join(cwd, 'missing-git-dir') }, excludes: [] }
     await expect(snapshotTree(runnerGit, broken, signal)).rejects.toThrow('git add in')
     await expect(ignoredPaths(runnerGit, broken, ['x'], signal)).rejects.toThrow('git check-ignore failed')
     expect(await ignoredPaths(runnerGit, broken, [], signal)).toEqual(new Set())
@@ -142,6 +143,22 @@ describe('repository edge cases', () => {
     const blocked = join(cwd, 'store-file')
     await writeFile(blocked, 'not a directory')
     await expect(locateGitWorkspace(runnerGit, cwd, objectsIn(blocked), signal)).rejects.toThrow()
+  })
+
+  it('treats a repository rooted at the drive or filesystem root as no repository', async () => {
+    const cwd = await scratchDir('dsh-git-rootrepo-', cleanups)
+    const storeRoot = await scratchDir('dsh-git-store-', cleanups)
+    const { git: runnerGit } = await runner()
+    const root = process.platform === 'win32' ? 'C:\\' : '/'
+    const spy = vi.spyOn(runnerGit, 'run').mockResolvedValue({
+      exitCode: 0, stdout: `${root}\n${join(root, '.git')}\n${join(root, '.git', 'objects')}\n`, stderr: '', truncated: false,
+    })
+    try {
+      expect(await locateGitWorkspace(runnerGit, cwd, objectsIn(storeRoot), signal)).toBeNull()
+    } finally {
+      spy.mockRestore()
+    }
+    expect(await readdir(storeRoot)).toEqual([])
   })
 })
 

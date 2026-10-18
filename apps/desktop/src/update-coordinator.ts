@@ -80,6 +80,9 @@ export class DesktopUpdateCoordinator {
   /** Latest observable state; complete download identity remains main-process-owned. */
   get state(): DesktopUpdateState { return this.current }
 
+  /** Whether this installation embeds an update source that a check can resolve. */
+  get hasUpdateSource(): boolean { return this.enabled() }
+
   /**
    * Check metadata without downloading, joining any current check.
    * @param manual - Whether a failed check must remain visible in the status indicator.

@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resolveDesktopPaths } from '../src/paths.ts'
 import { DesktopProjectManager } from '../src/project-manager.ts'
-import { readProfilePlugins } from '@deepseek-ai/dsh-app-boot'
+import { loadOptionalPatches, readProfilePlugins } from '@deepseek-ai/dsh-app-boot'
 import { runtimeFixture } from './runtime-fixture.ts'
 
 const roots: string[] = []
@@ -37,6 +37,16 @@ function setup(): { root: string; manager: DesktopProjectManager } {
   const dsh = join(root, 'resources', 'dsh')
   runtimeFixture(dsh)
   return { root, manager: new DesktopProjectManager(resolveDesktopPaths(join(root, '.dsh')), { dsh }) }
+}
+function seededRoutes(manager: DesktopProjectManager): string[] {
+  const patches = loadOptionalPatches('dsh', join(manager.paths.profile, 'cordis.patch.yml')) ?? []
+  const routes = new Set<string>()
+  for (const patch of patches) {
+    if (patch.id !== 'llm-pi-ai') continue
+    const providers = patch.config?.providers as Record<string, unknown> | undefined
+    for (const route of Object.keys(providers ?? {})) routes.add(route)
+  }
+  return [...routes]
 }
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
@@ -123,7 +133,7 @@ describe('desktop external plugin profile', () => {
     expect(manifest.dsh.profile.bundles).not.toContain('plugin')
     expect(manifest.dsh.profile.bundles).toContain('@deepseek-ai/dsh-web-app')
     await manager.applyRelease()
-    expect(readFileSync(patch, 'utf8')).toContain('[]')
+    expect(readFileSync(patch, 'utf8')).toContain('- id: llm-pi-ai')
   })
 
   it('needs no runtime or package manifest when no plugins have been installed', async () => {
@@ -182,8 +192,50 @@ describe('desktop external plugin profile', () => {
     await expect(manager.applyRelease()).resolves.toBeUndefined()
     expect(readFileSync(join(manager.paths.profile, '.DS_Store'), 'utf8')).toBe('metadata')
     expect(readFileSync(join(manager.paths.profile, 'user-file'), 'utf8')).toBe('retain')
-    expect(readFileSync(join(manager.paths.profile, 'cordis.patch.yml'), 'utf8')).toContain('[]')
+    expect(readFileSync(join(manager.paths.profile, 'cordis.patch.yml'), 'utf8')).toContain('- id: llm-pi-ai')
     expect(existsSync(join(manager.paths.profile, 'desktop-runtime-state.json'))).toBe(false)
+  })
+
+  it('seeds every preset provider route when first materializing a profile', async () => {
+    const { manager } = setup()
+    await manager.applyRelease()
+    expect(seededRoutes(manager)).toEqual(['deepseek', 'dashscope', 'zhipu', 'moonshot', 'siliconflow', 'openrouter', 'ollama'])
+  })
+
+  it('keeps user provider configuration while appending missing preset routes', async () => {
+    const { manager } = setup()
+    await manager.applyRelease()
+    const patch = join(manager.paths.profile, 'cordis.patch.yml')
+    writeFileSync(patch, [
+      '# my gateway notes',
+      '- id: llm-pi-ai',
+      '  config:',
+      '    providers:',
+      '      deepseek:',
+      '        baseURL: https://gateway.example/v1',
+      '        models: []',
+      '      mygateway:',
+      '        displayName: My Gateway',
+      '        api: openai-completions',
+      '        baseURL: https://my.example/v1',
+      '        models: []',
+      '',
+    ].join('\n'))
+    await manager.applyRelease()
+    const content = readFileSync(patch, 'utf8')
+    expect(content).toContain('# my gateway notes')
+    expect(content).toContain('baseURL: https://gateway.example/v1')
+    expect(content).toContain('mygateway:')
+    expect(seededRoutes(manager)).toEqual(['deepseek', 'mygateway', 'dashscope', 'zhipu', 'moonshot', 'siliconflow', 'openrouter', 'ollama'])
+  })
+
+  it('leaves the seeded patch untouched when reapplying a release', async () => {
+    const { manager } = setup()
+    await manager.applyRelease()
+    const patch = join(manager.paths.profile, 'cordis.patch.yml')
+    const seeded = readFileSync(patch, 'utf8')
+    await manager.applyRelease()
+    expect(readFileSync(patch, 'utf8')).toBe(seeded)
   })
 
   it('initializes and restarts offline without executing pnpm', async () => {
@@ -217,13 +269,15 @@ describe('desktop external plugin profile', () => {
     const { root, manager } = setup()
     await manager.applyRelease()
     seedPlugin(manager)
-    writeFileSync(join(manager.paths.profile, 'cordis.patch.yml'), '[]\n')
+    writeFileSync(join(manager.paths.profile, 'cordis.patch.yml'), '- id: plugin\n  config: {}\n')
     const nextRoot = join(root, 'relocated', 'dsh')
     runtimeFixture(nextRoot, '1.1.0')
     const next = new DesktopProjectManager(manager.paths, { ...manager.runtime, dsh: nextRoot })
     await expect(next.applyRelease()).resolves.toBeUndefined()
     expect(plugins(next)).toEqual(plugins(manager))
-    expect(readFileSync(join(manager.paths.profile, 'cordis.patch.yml'), 'utf8')).toBe('[]\n')
+    const patch = readFileSync(join(manager.paths.profile, 'cordis.patch.yml'), 'utf8')
+    expect(patch).toContain('- id: plugin')
+    expect(patch).toContain('- id: llm-pi-ai')
     expect(readFileSync(join(manager.paths.profile, 'node_modules/plugin/bundle.yml'), 'utf8')).toBe('[]\n')
   })
 

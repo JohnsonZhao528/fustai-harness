@@ -1,0 +1,17 @@
+{
+  "productName": "FustAI Harness",
+  "productNameShort": "FustAI",
+  "company": "Fustai",
+  "cliName": "fustai",
+  "npmScope": "@fustai",
+  "pkgName": "@fustai/harness",
+  "appId": "com.fustai.harness",
+  "homepage": "https://www.fustai.com",
+  "supportEmail": "support@fustai.com",
+  "updateFeed": "https://update.fustai.com",
+  "envHome": "FUSTAI_HOME",
+  "envHomeCompat": "DSH_HOME",
+  "defaultHomeDir": ".fustai",
+  "telemetryEnabled": false,
+  "protocol": "fustai"
+}

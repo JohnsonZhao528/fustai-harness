@@ -18,7 +18,7 @@ type ExecFileMock = (
 
 const { execFileMock } = vi.hoisted(() => ({ execFileMock: vi.fn<ExecFileMock>() }))
 
-vi.mock('node:child_process', () => ({ execFile: execFileMock }))
+vi.mock('node:child_process', () => ({ execFile: execFileMock, spawn: vi.fn() }))
 
 import { describe, expect, it, vi } from 'vitest'
 import { pickNativeDirectory, type DirectoryPickerRunner } from '../src/native-picker.ts'

@@ -45,7 +45,8 @@ const operations = {
   startSignIn: async () => ({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out' as const, attempt: null }),
   cancelSignIn: async () => ({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out' as const, attempt: null }),
   copySignInLink: async () => undefined,
-  saveApiKey: () => Promise.resolve({ ok: true as const }),
+  listProviders: () => Promise.resolve([{ id: 'deepseek', name: 'DeepSeek' }]),
+  saveApiKey: (_provider: string, _value: string) => Promise.resolve({ ok: true as const }),
   skip: () => Promise.resolve(),
 }
 
@@ -126,11 +127,17 @@ describe('desktop welcome window', () => {
     expect(await take(own)).toBe('session-expired')
     expect(takeNotice).toHaveBeenCalledOnce()
     const save = electron.handlers.get(WELCOME_IPC.saveApiKey)!
-    await expect(save({ sender: {}, senderFrame: {} }, 'sk-test')).rejects.toThrow('unowned frame')
-    await expect(save({ ...own, senderFrame: {} }, 'sk-test')).rejects.toThrow('unowned frame')
-    expect(await save(own, 'bad key')).toEqual({ ok: false })
+    await expect(save({ sender: {}, senderFrame: {} }, 'deepseek', 'sk-test')).rejects.toThrow('unowned frame')
+    await expect(save({ ...own, senderFrame: {} }, 'deepseek', 'sk-test')).rejects.toThrow('unowned frame')
+    expect(await save(own, 'deepseek', 'bad key')).toEqual({ ok: false })
+    expect(await save(own, '', 'sk-test')).toEqual({ ok: false })
+    expect(await save(own, 42, 'sk-test')).toEqual({ ok: false })
     expect(saveApiKey).not.toHaveBeenCalled()
-    expect(await save(own, 'sk-test')).toEqual({ ok: true })
+    expect(await save(own, 'deepseek', 'sk-test')).toEqual({ ok: true })
+    expect(saveApiKey).toHaveBeenCalledExactlyOnceWith('deepseek', 'sk-test')
+    const list = electron.handlers.get(WELCOME_IPC.listProviders)!
+    await expect(list({ ...own, senderFrame: {} })).rejects.toThrow('unowned frame')
+    expect(await list(own)).toEqual([{ id: 'deepseek', name: 'DeepSeek' }])
     await electron.handlers.get(WELCOME_IPC.skip)!(own)
     expect(skip).toHaveBeenCalledOnce()
     const copy = electron.handlers.get(WELCOME_IPC.copyLink)!

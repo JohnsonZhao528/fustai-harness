@@ -7,6 +7,7 @@ import type { DesktopLocale } from './locale.ts'
 /** Private native welcome channels, installed only while its window exists. */
 export const WELCOME_IPC = {
   saveApiKey: 'dsh-welcome:save-api-key',
+  listProviders: 'dsh-welcome:list-providers',
   analytics: 'dsh-welcome:analytics',
   analyticsEnabled: 'dsh-welcome:analytics-enabled',
   skip: 'dsh-welcome:skip',
@@ -19,6 +20,12 @@ export const WELCOME_IPC = {
 
 /** Credential writes return a safe outcome without exposing Host diagnostics. */
 export type WelcomeSaveResult = { readonly ok: true } | { readonly ok: false }
+
+/** A provider route that accepts a user-supplied API key. */
+export interface WelcomeProvider {
+  readonly id: string
+  readonly name: string
+}
 
 /** One-time notification retained by the main process until Welcome receives it. */
 export type WelcomeNotice = 'session-expired'
@@ -41,11 +48,17 @@ export interface WelcomeOperations {
   copySignInLink(id: SignInAttemptId): Promise<void>
 
   /**
-   * Store the official provider's key before entering the workspace.
+   * Provider routes that accept an API key, in catalog order.
+   * @returns public entries for the key form selection list.
+   */
+  listProviders(): Promise<readonly WelcomeProvider[]>
+  /**
+   * Store a provider's key before entering the workspace.
+   * @param provider - provider id chosen in the key form.
    * @param value - validated, trimmed API key.
    * @returns whether the write completed, without private error details.
    */
-  saveApiKey(value: string): Promise<WelcomeSaveResult>
+  saveApiKey(provider: string, value: string): Promise<WelcomeSaveResult>
   /**
    * Enter the workspace without writing an onboarding-completion setting.
    * @returns completion after the workspace opens.

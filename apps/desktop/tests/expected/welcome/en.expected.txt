@@ -1,6 +1,5 @@
-DeepSeek Harness
-DeepSeek Harness
-Welcome to DeepSeek Harness
+FustAI Harness
+FustAI Harness
+Welcome to FustAI Harness
 Build potential. Explore intelligence.
-Sign in
 Add API Key

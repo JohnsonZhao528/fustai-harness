@@ -22,6 +22,7 @@ import {
 import type { DesktopPaths } from './paths.ts'
 import type { DesktopRelease } from './release.ts'
 import { readDesktopRuntime } from './runtime-tree.ts'
+import { seedProviderRoutes } from './provider-seed.ts'
 import {
   initProfile, PROFILE_TEMPLATES, removeLinkProjections, sanitizeProfile, type ProfileTemplate,
 } from '@deepseek-ai/dsh-app-boot'
@@ -86,6 +87,7 @@ export class DesktopProjectManager {
       readDesktopRuntime(this.runtime.dsh)
       migrateProfileSettings(this.paths.profile)
       createPluginProfile(this.paths.profile)
+      seedProviderRoutes(this.paths.profile)
       removeLinkProjections(this.paths.profile)
     })
   }

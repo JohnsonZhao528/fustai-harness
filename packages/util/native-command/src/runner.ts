@@ -1,9 +1,9 @@
 /**
- * Shared no-shell `execFile` runner for host-native OS integrations.
+ * Shared no-shell `execFile` and detached-launch runners for host-native OS integrations.
  * @module @deepseek-ai/dsh-native-command/runner
  */
 
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 
 /** Testable command boundary; native implementations never invoke a shell. */
 export type NativeCommandRunner = (
@@ -41,4 +41,32 @@ export const runNativeCommand: NativeCommandRunner = (command, args, signal, win
         resolve({ stdout, stderr })
       },
     )
+  })
+
+/** Testable hand-off boundary: start a GUI process and resolve once it runs. */
+export type DetachedCommandLauncher = (
+  command: string,
+  args: readonly string[],
+  signal: AbortSignal,
+) => Promise<void>
+
+/**
+ * Start a detached GUI process that outlives the request, resolving once the OS
+ * reports the child spawned. The signal is checked before launch only; passing it
+ * to `spawn` would kill the editor as soon as the caller's request completes.
+ * @param command - executable path or PATH name.
+ * @param args - argv (never a shell string).
+ * @param signal - caller lifetime checked before spawning.
+ * @throws the caller's abort reason when the signal is already aborted, or the
+ * spawn failure such as `ENOENT` when the executable cannot start.
+ */
+export const launchDetachedCommand: DetachedCommandLauncher = (command, args, signal) =>
+  new Promise((resolve, reject) => {
+    signal.throwIfAborted()
+    const child = spawn(command, [...args], { detached: true, stdio: 'ignore' })
+    child.once('error', reject)
+    child.once('spawn', () => {
+      child.unref()
+      resolve()
+    })
   })

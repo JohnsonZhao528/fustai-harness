@@ -294,6 +294,31 @@ body {
   opacity: 1;
 }
 
+.key-field select {
+  display: block;
+  width: 100%;
+  height: 48px;
+  margin-bottom: 8px;
+  padding: 7px 14px;
+  border: 1px solid var(--dsw-alias-border-l4);
+  border-radius: 12px;
+  outline: none;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-weight: inherit;
+  font-size: 14px;
+  line-height: 24px;
+}
+
+.key-field select:focus {
+  border-color: var(--dsw-alias-brand-primary);
+}
+
+.key-field select:disabled {
+  color: var(--dsw-alias-label-caption);
+}
+
 .key-error {
   position: absolute;
   top: 100%;

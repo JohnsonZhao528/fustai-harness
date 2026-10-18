@@ -1,5 +1,5 @@
 import OTel from '@deepseek-ai/dsh-otel'
-/** Desktop-only collector policy and bounded shutdown against an unresponsive receiver. */
+/** Shipped rows stay disabled; collector policy and bounded shutdown once a deployment re-enables them. */
 import { createServer } from 'node:http'
 import { once } from 'node:events'
 import { fileURLToPath } from 'node:url'
@@ -12,7 +12,7 @@ import { afterEach, expect, it, onTestFinished, vi } from 'vitest'
 
 afterEach(() => { vi.unstubAllEnvs() })
 
-it.each(['desktop', 'web'])('limits collection and its shutdown to the Desktop launch: %s', async (profile) => {
+it('ships product telemetry and analytics disabled and exports only after a deployment re-enables them', async () => {
   const received = Promise.withResolvers<undefined>()
   const server = createServer((req) => { req.resume(); req.once('end', () => { received.resolve(undefined) }) })
   server.listen(0, '127.0.0.1')
@@ -25,7 +25,7 @@ it.each(['desktop', 'web'])('limits collection and its shutdown to the Desktop l
   const ctx = new Context()
   onTestFinished(() => ctx.fiber.dispose())
   ctx.provide('profileContext', {
-    name: profile, dir: '/profile', patchPath: '/profile/cordis.patch.yml', installAnchor: '/profile/package.json',
+    name: 'desktop', dir: '/profile', patchPath: '/profile/cordis.patch.yml', installAnchor: '/profile/package.json',
     cwd: '/workspace', home: '/home', startedBundles: [], overlays: [], telemetryDisabledEnv: undefined,
   })
   const identity = vi.fn().mockResolvedValue(undefined)
@@ -37,16 +37,17 @@ it.each(['desktop', 'web'])('limits collection and its shutdown to the Desktop l
   ctx.loader.builtins.analytics = Analytics
   const rows = loadOverlayPatches('analytics', fileURLToPath(new URL('../cordis.patch.yml', import.meta.url)))
     .flatMap(patch => patch.insert ?? []).filter(row => row.id === 'desktop-product-telemetry' || row.id === 'product-analytics')
-  const entries = rows.map(row => ({ ...row, name: row.id === 'desktop-product-telemetry' ? 'cordis:telemetry' : 'cordis:analytics' }))
+  const disabledById = new Map(rows.map(row => [row.id, row.disabled]))
+  expect(disabledById.get('desktop-product-telemetry')).toBe(true)
+  expect(disabledById.get('product-analytics')).toBe(true)
+  const entries = rows.map(row => ({
+    ...row, disabled: false,
+    name: row.id === 'desktop-product-telemetry' ? 'cordis:telemetry' : 'cordis:analytics',
+  }))
   await ctx.loader.root.update(entries)
   await ctx.loader.await()
   const entry = ctx.loader.resolve('desktop-product-telemetry')
-  expect(entry.disabled).toBe(profile !== 'desktop')
-  if (profile !== 'desktop') {
-    expect(ctx.get('productTelemetry')).toBeUndefined()
-    expect(ctx.get('productAnalytics')).toBeUndefined()
-    return
-  }
+  expect(entry.disabled).toBe(false)
   expect(rows[0]!.config).toMatchObject({
     scheduledDelayMillis: 30000, timeoutMillis: 15000, exportTimeoutMillis: 20000, shutdownTimeoutMillis: 2000,
   })

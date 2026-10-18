@@ -1,8 +1,7 @@
-DeepSeek Harness
-DeepSeek Harness
+FustAI Harness
+FustAI Harness
 Add an API key to get started
-Configure official DeepSeek models to start using Harness
+Choose a model provider and add its API key to start using Harness
 Enter API key [password]
 Save and continue [disabled]
 Set up later
-Back to sign in

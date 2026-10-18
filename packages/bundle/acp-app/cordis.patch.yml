@@ -16,8 +16,8 @@
       name: '@deepseek-ai/dsh-acp'
       inject: [acpAppStartup]
       config:
-        provider: deepseek-official
-        model: deepseek-v4-flash
+        provider: deepseek
+        model: deepseek-chat
 
 - id: hmr
   disabled: true

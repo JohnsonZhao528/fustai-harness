@@ -45,7 +45,7 @@ The `NativeCommandRunner` type is the injectable command boundary for host integ
 
 ### Opening a Host path
 
-`openNativePath(path, signal)` hands a path to the default application and prefers the named default browser for HTML and SVG where the platform can identify one. `openNativeAssociatedPath(path, signal)` always uses the file-type association, without a browser override. `openNativeTextFile(path, signal)` selects text-editor intent; on macOS it uses `open -t`. Windows hands every intent to Explorer, so the shell's own default-application resolution — the one a double-click uses — picks the application; Explorer receives the target as an encoded file URI and its exit code 1 counts as a delegated handoff, while cancellation, missing executables, and other exit codes still reject. This acknowledgement does not prove that an application opened the file. WSL paths are translated with `wslpath -w` before the Windows desktop receives them. `canOpenNativePath()` reports whether the current Host plausibly has a desktop target.
+`openNativePath(path, signal)` hands a path to the default application and prefers the named default browser for HTML and SVG where the platform can identify one. `openNativeAssociatedPath(path, signal)` always uses the file-type association, without a browser override. `openNativeTextFile(path, signal)` selects text-editor intent, which bypasses the file-type association: macOS uses `open -t` and Windows launches Notepad directly as a detached process, so a broken handler cannot consume the edit gesture. Other Windows intents go to Explorer, so the shell's own default-application resolution — the one a double-click uses — picks the application; Explorer receives the target as an encoded file URI and its exit code 1 counts as a delegated handoff, while cancellation, missing executables, and other exit codes still reject. This acknowledgement does not prove that an application opened the file. WSL paths are translated with `wslpath -w` before the Windows desktop receives them. `canOpenNativePath()` reports whether the current Host plausibly has a desktop target.
 
 `revealNativePath(path, signal)` selects the file in Finder or Explorer, including WSL path translation, and opens its parent directory through `xdg-open` on desktop Linux. `nativeFileManager()` identifies that action for Host-derived UI labels; desktop availability remains a separate `canOpenNativePath()` check. Callers must authorize the absolute file path before invoking either operation. Platform dispatch is covered by injected-runner tests; native desktop verification belongs to the corresponding platform. Explorer receives an encoded file URI as a separate argument. Its exit code 1 is accepted as a delegated handoff; cancellation, missing executables, and other exit codes still reject. This acknowledgement does not prove that an application opened the file or that a window selected it.
 
@@ -59,14 +59,14 @@ The `NativeCommandRunner` type is the injectable command boundary for host integ
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-The command runner is a thin wrapper over Node's `execFile`. The path opener selects one shell-free command from platform and environment facts, while callers retain authority over which path may be opened.
+The command runner is a thin wrapper over Node's `execFile`; the detached launcher wraps `spawn` for a GUI editor that must outlive the request. The path opener selects one shell-free command from platform and environment facts, while callers retain authority over which path may be opened.
 
 ### Source map
 
 | File | Role |
 |---|---|
 | [`src/index.ts`](src/index.ts) | Public command-runner and path-opener exports |
-| [`src/runner.ts`](src/runner.ts) | Shell-free `execFile` adapter |
+| [`src/runner.ts`](src/runner.ts) | Shell-free `execFile` and detached GUI-launch adapters |
 | [`src/path-opener.ts`](src/path-opener.ts) | Desktop detection, open intents, browser preference, and WSL translation |
 
 ### What execFile gives the runner

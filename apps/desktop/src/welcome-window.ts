@@ -66,7 +66,7 @@ export async function openWelcomeWindow(locale: DesktopLocale, operations: Welco
     active = false
     for (const channel of [
       WELCOME_IPC.analyticsEnabled, WELCOME_IPC.analytics, WELCOME_IPC.takeNotice, WELCOME_IPC.saveApiKey,
-      WELCOME_IPC.skip, WELCOME_IPC.start, WELCOME_IPC.cancel, WELCOME_IPC.copyLink,
+      WELCOME_IPC.listProviders, WELCOME_IPC.skip, WELCOME_IPC.start, WELCOME_IPC.cancel, WELCOME_IPC.copyLink,
     ]) {
       ipcMain.removeHandler(channel)
     }
@@ -93,10 +93,15 @@ export async function openWelcomeWindow(locale: DesktopLocale, operations: Welco
     } else throw new Error('desktop welcome: invalid analytics event')
   })
   ipcMain.handle(WELCOME_IPC.takeNotice, async (event) => { assertSender(event); return operations.takeNotice() })
-  ipcMain.handle(WELCOME_IPC.saveApiKey, async (event, value: unknown) => {
+  ipcMain.handle(WELCOME_IPC.listProviders, async (event) => {
     assertSender(event)
+    return operations.listProviders()
+  })
+  ipcMain.handle(WELCOME_IPC.saveApiKey, async (event, provider: unknown, value: unknown) => {
+    assertSender(event)
+    if (typeof provider !== 'string' || provider === '') return { ok: false }
     if (typeof value !== 'string' || !/^[\x21-\x7e]+$/.test(value)) return { ok: false }
-    return operations.saveApiKey(value)
+    return operations.saveApiKey(provider, value)
   })
   ipcMain.handle(WELCOME_IPC.skip, async (event) => {
     assertSender(event)

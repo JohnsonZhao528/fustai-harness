@@ -3,20 +3,20 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write packages/experimental/badge-skill-bundle/README.md
 /:
-  en: fc73b6a11f583014
-  zh: 9b2a3ee017befdd8
+  en: eeac4880bf073ef5
+  zh: 50725a984b0f1504
 /deepseek-ai-dsh-experimental-badge-skill-bundle:
   en: e9f3f3f4aea1c588
   zh: 706c6a9f82b3358a
 /deepseek-ai-dsh-experimental-badge-skill-bundle/summary:
-  en: 98328e636b0f758a
-  zh: 0d8cf62176fb5e10
+  en: 7ecc29e351373711
+  zh: 40b082d8ed5f96fd
 /deepseek-ai-dsh-experimental-badge-skill-bundle/table-of-contents:
   en: d152484eb41ac6b4
   zh: 988e839059414d27
 /deepseek-ai-dsh-experimental-badge-skill-bundle/use-this-package:
-  en: 21fc43b87f896a26
-  zh: 84c71fa133f0d9a0
+  en: 33973ca2e638e304
+  zh: 2376169ba1060e3d
 /deepseek-ai-dsh-experimental-badge-skill-bundle/understand-the-implementation:
   en: e1ce6533996f4fe6
   zh: 5bf2931419881347

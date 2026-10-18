@@ -80,11 +80,15 @@ function publicSpecifiers(pkg: WorkspacePackage): string[] {
   return [...specifiers].sort()
 }
 
+// Junctions on Windows avoid the SeCreateSymbolicLink privilege that real
+// directory symlinks need; POSIX platforms keep 'dir' symlinks unchanged.
+const LINK_TYPE: 'dir' | 'junction' = process.platform === 'win32' ? 'junction' : 'dir'
+
 function linkPackage(pkg: WorkspacePackage, nodeModules: string): void {
   const parts = pkg.name.split('/')
   const link = resolve(nodeModules, ...parts)
   mkdirSync(dirname(link), { recursive: true })
-  symlinkSync(pkg.dir, link, 'dir')
+  symlinkSync(pkg.dir, link, LINK_TYPE)
 }
 
 const packages = workspacePackages()
@@ -117,7 +121,7 @@ try {
   if (existsSync(rootTypes)) {
     const typesDir = resolve(nodeModules, '@types')
     mkdirSync(typesDir, { recursive: true })
-    symlinkSync(rootTypes, resolve(typesDir, 'node'), 'dir')
+    symlinkSync(rootTypes, resolve(typesDir, 'node'), LINK_TYPE)
   }
 
   writeFileSync(resolve(tmp, 'package.json'), `${JSON.stringify({ type: 'module', private: true }, null, 2)}\n`)

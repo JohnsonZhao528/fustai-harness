@@ -5,17 +5,20 @@
  * The default intent prefers the default browser for documents it renders when
  * the platform can name one, then falls back to the default application. WSL
  * translates every path for the Windows desktop instead of assuming a Linux
- * GUI. The text-editor intent never consults the browser. Windows hands every
- * intent to Explorer: the shell's own default-application resolution, the one
- * a double-click uses, selects the application, while a process that resolves
- * the association itself reads a narrower record and reports none.
+ * GUI. The text-editor intent never consults the browser. Windows hands the
+ * open and reveal intents to Explorer: the shell's own default-application
+ * resolution, the one a double-click uses, selects the application, while a
+ * process that resolves the association itself reads a narrower record and
+ * reports none. The text-editor intent launches Notepad directly on Windows,
+ * the same bypass macOS `open -t` performs, so a broken file-type association
+ * cannot consume an edit gesture.
  * @module @deepseek-ai/dsh-native-command/path-opener
  */
 
 import { release as osRelease } from 'node:os'
 import { dirname, extname } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { runNativeCommand, type NativeCommandRunner } from './runner.ts'
+import { launchDetachedCommand, runNativeCommand, type DetachedCommandLauncher, type NativeCommandRunner } from './runner.ts'
 
 /** Testable command boundary; native implementations never invoke a shell. */
 export type PathOpenerRunner = NativeCommandRunner
@@ -28,6 +31,8 @@ export interface PathOpenerInternals {
   /** Environment used for WSL markers and the desktop Linux browser convention. */
   env?: NodeJS.ProcessEnv
   run?: PathOpenerRunner
+  /** Hand-off launcher for a GUI editor that must outlive the request. */
+  launchDetached?: DetachedCommandLauncher
 }
 
 /** Documents a browser renders, as opposed to ones an editor merely edits. */
@@ -84,6 +89,15 @@ async function openInBrowser(
 
 /** Native path-open intent; macOS distinguishes text editing from file association. */
 type PathOpenIntent = 'default' | 'association' | 'text-editor'
+
+/**
+ * The Windows system text editor. Launching it directly keeps an edit gesture
+ * from depending on the file-type association: Explorer hands the file to
+ * whatever the association names, and a handler whose executable is missing a
+ * runtime DLL fails with a shell error dialog instead of opening the file.
+ * Notepad ships with every Windows install.
+ */
+const WINDOWS_TEXT_EDITOR = 'notepad.exe'
 
 /** Whether one environment marker is set to a non-empty value. */
 function present(value: string | undefined): boolean {
@@ -173,6 +187,7 @@ async function openNativePathWithIntent(
 ): Promise<void> {
   const platform = internals.platform ?? process.platform
   const run = internals.run ?? runNativeCommand
+  const launch = internals.launchDetached ?? launchDetachedCommand
   const env = internals.env ?? process.env
   const wsl = platform === 'linux' && isWsl(internals)
 
@@ -185,6 +200,10 @@ async function openNativePathWithIntent(
   }
 
   if (platform === 'win32') {
+    if (intent === 'text-editor') {
+      await launch(WINDOWS_TEXT_EDITOR, [path], signal)
+      return
+    }
     await openWindowsPath(path, signal, run)
     return
   }
@@ -249,8 +268,10 @@ export function openNativeAssociatedPath(
 }
 
 /**
- * Open a text document for editing; macOS bypasses the file-type association
- * so a YAML association with a browser cannot consume the gesture.
+ * Open a text document for editing; macOS `open -t` and Windows Notepad both
+ * bypass the file-type association, so a YAML association with a browser or a
+ * broken handler cannot consume the gesture. On Windows the returned promise
+ * settles once Notepad has spawned; the editor outlives the request.
  * @param path - absolute or host-resolvable text-document path.
  * @param signal - caller/connection lifetime; abort terminates the native command.
  * @param internals - Platform and runner hooks for deterministic tests.

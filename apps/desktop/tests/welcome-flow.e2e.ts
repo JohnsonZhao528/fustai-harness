@@ -121,7 +121,9 @@ describe.skipIf(!existsSync(builtHost))('built Desktop welcome flow', () => {
         dsh: project,
       })
       await manager.applyRelease()
-      writeFileSync(join(paths.profile, 'cordis.patch.yml'), `- id: webserver\n  config:\n    host: 127.0.0.1\n    port: 0\n- id: deepseek-account\n  config:\n${process.platform === 'linux' ? '    desktopPlatform: darwin\n' : ''}    platformOrigin: ${platform.origin}\n    allowLoopbackHttp: true\n    requestHeaders:\n      Cookie: test_gate=synthetic\n`)
+      const accountConfig = `${process.platform === 'linux' ? '    desktopPlatform: darwin\n' : ''}    platformOrigin: ${platform.origin}\n    allowLoopbackHttp: true\n    requestHeaders:\n      Cookie: test_gate=synthetic\n`
+      writeFileSync(join(paths.profile, 'cordis.patch.yml'),
+        readFileSync(join(paths.profile, 'cordis.patch.yml'), 'utf8') + `- id: webserver\n  config:\n    host: 127.0.0.1\n    port: 0\n- id: deepseek-account\n  name: '@deepseek-ai/dsh-deepseek-account-platform'\n  config:\n${accountConfig}`)
       let backend: DesktopWelcomeBackend
       let hostOrigin = ''
       const restart = async (): Promise<void> => {
@@ -153,7 +155,7 @@ describe.skipIf(!existsSync(builtHost))('built Desktop welcome flow', () => {
       await restart()
       expect(await status()).toMatchObject({ hasApiKey: false, localePreference: 'zh' })
       expect(fingerprint()).toBe(before)
-      expect(await backend!.save('sk-local-onboarding-test')).toEqual({ ok: true })
+      expect(await backend!.save('deepseek', 'sk-local-onboarding-test')).toEqual({ ok: true })
       expect(await status()).toMatchObject({ hasApiKey: true, localePreference: 'zh' })
       await restart()
       expect(await status()).toMatchObject({ hasApiKey: true })

@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-brand",
-  "description": "Stateless branded primitive types for the DeepSeek Harness",
+  "description": "Stateless branded primitive types for the FustAI Harness",
   "version": "0.2.1-alpha.4",
   "publishConfig": {
     "access": "public"

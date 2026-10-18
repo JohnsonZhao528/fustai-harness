@@ -932,7 +932,7 @@ async function main(): Promise<void> {
   const applicationIconPath = development ? join(app.getAppPath(), 'resources', 'icon-windows.png')
     : join(process.resourcesPath, 'icon.png')
   app.setAboutPanelOptions({
-    applicationName: 'DeepSeek Harness',
+    applicationName: 'FustAI Harness',
     applicationVersion: app.getVersion(),
     // The release has no separate build number; omit Electron's bundle version.
     version: '',
@@ -959,7 +959,11 @@ async function main(): Promise<void> {
         click: () => { void showAbout().catch((error: unknown) => { console.error(error) }) } }
       : { label: currentDesktopLocale().messages.aboutMenu, role: 'about' },
     { type: 'separator' },
-    { label: currentDesktopLocale().messages.checkUpdatesMenu, click: () => { void openUpdatePrompt(true) } },
+    // Unpackaged development builds omit the update source; offering a check
+    // there would only report a failure, so the command appears when solvable.
+    ...(updates.hasUpdateSource
+      ? [{ label: currentDesktopLocale().messages.checkUpdatesMenu, click: () => { void openUpdatePrompt(true) } }]
+      : []),
     ...process.platform === 'darwin' || process.platform === 'win32'
       ? [{ label: currentDesktopLocale().messages.cliCommandMenu, click: () => { void commandManager.show() } }] : [],
     ...development ? [
@@ -1172,9 +1176,13 @@ async function main(): Promise<void> {
           }
           await clipboard.writeText(platformLoginUrl(state.attempt.authorizeUrl))
         },
-        saveApiKey: async (apiKey) => {
+        listProviders: async () => {
+          if (backend.host === undefined || welcomeBackend === undefined) return []
+          return welcomeBackend.listProviders()
+        },
+        saveApiKey: async (provider, apiKey) => {
           if (backend.host === undefined || welcomeBackend === undefined) return { ok: false }
-          const saved = await welcomeBackend.save(apiKey)
+          const saved = await welcomeBackend.save(provider, apiKey)
           if (!saved.ok) return saved
           await enterWorkspace()
           return { ok: true }

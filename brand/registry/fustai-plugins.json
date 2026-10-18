@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "title": {
+    "en": "FustAI Plugin Market",
+    "zh": "FustAI 插件市场"
+  },
+  "description": {
+    "en": "Official plugin index for FustAI Harness. Publish @fustai packages to npm, then list them here.",
+    "zh": "FustAI Harness 官方插件索引。@fustai 系列包发布到 npm 后在此登记。"
+  },
+  "metadata": {
+    "categories": {},
+    "labels": {},
+    "sortKeys": {}
+  },
+  "plugins": []
+}

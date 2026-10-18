@@ -1,6 +1,6 @@
 /** Git working-tree snapshots, tree diffs, and ignore checks through the subprocess capability. */
 import { copyFile, mkdir, mkdtemp, rm } from 'node:fs/promises'
-import { join, relative, resolve } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import { parseNumstat, type NumstatEntry } from './numstat.ts'
 import { canonicalPath, isInside, toPosix } from './paths.ts'
@@ -118,6 +118,11 @@ function isMissing(error: unknown): boolean {
  * tree, as a temporary root under the workspace does, is excluded from every
  * snapshot. A directory outside any repository yields null; any other git
  * failure throws.
+ *
+ * A located repository whose root is a filesystem or drive root (such as a
+ * stray `C:\.git`) yields null as well: its work tree is the whole drive, so
+ * snapshotting it would scan every file on the machine instead of the
+ * Session's workspace.
  * @param git - command runner.
  * @param cwd - absolute Session working directory.
  * @param scratch - yields the private directory for snapshot objects and scratch indexes; called only for a located repository.
@@ -131,6 +136,8 @@ export async function locateGitWorkspace(
   if (found.exitCode === 128 && /not a git repository/i.test(found.stderr)) return null
   const lines = ok(found, 'git rev-parse').stdout.split('\n').map(line => resolve(cwd, line))
   const [root, gitDir, repositoryObjects] = lines as [string, string, string]
+  // A repository rooted at a drive or filesystem root is accidental; treat it as absent.
+  if (dirname(root) === root) return null
   // git reports the canonical root; compare the private directory in the same spelling.
   const directory = await canonicalPath(await scratch())
   const objects = join(directory, 'objects')

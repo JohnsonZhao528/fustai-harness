@@ -64,13 +64,13 @@ beforeEach(() => {
 })
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks() })
 
-it('registers account sign-in in a plain browser without the Desktop-only surfaces, including after reload', async ({ start }) => {
+it('registers the account launcher in a plain browser without the Desktop-only surfaces, including after reload', async ({ start }) => {
   const c = await start()
   for (const reload of [false, true]) {
     if (reload) await c.reload(SELF)
     await c.mock.streams.opened('account/watch', reload ? 2 : 1)
     expect(c.ctx.slots.entries('settings.launcher')).toHaveLength(1)
-    expect(c.ctx.slots.entries('settings.models.sign-in')).toHaveLength(1)
+    expect(c.ctx.slots.entries('settings.models.sign-in')).toHaveLength(0)
     expect(quotaNoticeEntry(c)).toBeDefined()
     expect(platformHostEntry(c)).toBeUndefined()
     expect(c.ctx.slots.entries('shell.overlay').some(entry => entry.options.id === 'desktop-onboarding')).toBe(false)
@@ -97,7 +97,6 @@ it('shares account actions across seats, publishes dialog ownership, and opens c
   vi.stubGlobal('dshDesktop', {})
   const c = await start()
   const actions = operations(c)
-  expect(c.ctx.slots.entries('settings.models.sign-in')[0]!.inject!()).toBe(actions)
   // The account UI follows the live theme service through the framework hook channel.
   const theme = c.ctx.get('theme') as ThemeRuntime
   const onTheme = vi.fn()

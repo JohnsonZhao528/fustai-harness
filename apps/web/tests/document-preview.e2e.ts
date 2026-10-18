@@ -1257,7 +1257,7 @@ else process.exit(1);
     ].join('\n'))
 
     const officeMenus: number[] = []
-    const configurationGuide = 'Read failed: Office previews are unavailable. Enable the document preview service on the computer running DeepSeek Harness.'
+    const configurationGuide = 'Read failed: Office previews are unavailable. Enable the document preview service on the computer running FustAI Harness.'
     for (const extension of ['doc', 'docx', 'ppt', 'pptx']) {
       await openFile(`unavailable.${extension}`)
       expect(await preview.locator('[data-document-viewer-menu]').count()).toBe(0)
@@ -1545,7 +1545,7 @@ describe.skipIf(MODE === 'record')('web e2e: Host Office preview', () => {
     if (cwd === undefined) throw new Error('settled Session has no workspace cwd')
     await Promise.all([
       writeFile(join(cwd, 'renamed.docx'), 'This is plain text renamed to docx.'),
-      writeFile(join(cwd, 'chinese.docx'), realOfficeBytes('docx', 'DSH Missing Preview Font')),
+      writeFile(join(cwd, 'chinese.docx'), realOfficeBytes('docx', 'FustAI Missing Preview Font')),
       writeFile(join(cwd, 'chinese.pptx'), realOfficeBytes('pptx')),
       ...(['doc', 'ppt'] as const).map(extension => writeFile(join(cwd, `chinese.${extension}`), realOfficeBytes(extension))),
       ...['doc', 'ppt'].map(extension => writeFile(join(cwd, `renamed.${extension}`), 'Plain text is not a binary Office document.')),
@@ -1693,7 +1693,7 @@ describe.skipIf(MODE === 'record')('web e2e: Host Office preview', () => {
       await successShot(page, 'office-font-warning')
       await warning.click()
       const details = page.getByRole('dialog', { name: 'Missing fonts', exact: true })
-      await details.getByText('DSH Missing Preview Font', { exact: true }).waitFor({ state: 'visible' })
+      await details.getByText('FustAI Missing Preview Font', { exact: true }).waitFor({ state: 'visible' })
       expect(await page.getByRole('tooltip', { name: /Missing fonts:/ }).count()).toBe(0)
       await successShot(page, 'office-font-details')
       await page.keyboard.press('Escape')

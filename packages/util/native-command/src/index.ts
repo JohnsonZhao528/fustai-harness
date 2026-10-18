@@ -3,8 +3,8 @@
  * @module @deepseek-ai/dsh-native-command
  */
 
-export { runNativeCommand } from './runner.ts'
-export type { NativeCommandRunner } from './runner.ts'
+export { launchDetachedCommand, runNativeCommand } from './runner.ts'
+export type { DetachedCommandLauncher, NativeCommandRunner } from './runner.ts'
 export {
   canOpenNativePath,
   nativeFileManager,

@@ -39,5 +39,72 @@
 - id: authorization
   disabled: true
 
-- id: deepseek-account
-  disabled: true
+# Preset provider routes, mirroring the desktop release seed, so the default
+# model resolves out of the box. With `credentials` disabled each apiKeyEnv
+# resolves through the launch environment; a named-but-unset key fails loud
+# (MISSING_CREDENTIAL) only when that route is actually requested. `ollama`
+# omits apiKeyEnv and defers to pi-ai's own environment discovery.
+- id: llm-pi-ai
+  config:
+    providers:
+      deepseek:
+        displayName: DeepSeek
+        api: openai-completions
+        baseURL: https://api.deepseek.com
+        apiKeyEnv: DEEPSEEK_API_KEY
+        models:
+          - id: deepseek-chat
+            input: [text]
+          - id: deepseek-reasoner
+            input: [text]
+            compat: { thinkingFormat: deepseek }
+      dashscope:
+        displayName: 阿里百炼
+        api: openai-completions
+        baseURL: https://dashscope.aliyuncs.com/compatible-mode/v1
+        apiKeyEnv: DASHSCOPE_API_KEY
+        compat: { supportsDeveloperRole: false, maxTokensField: max_tokens }
+        models:
+          - id: qwen-max
+            input: [text, image]
+      zhipu:
+        displayName: 智谱
+        api: openai-completions
+        baseURL: https://open.bigmodel.cn/api/paas/v4
+        apiKeyEnv: ZHIPU_API_KEY
+        compat: { supportsDeveloperRole: false, maxTokensField: max_tokens }
+        models:
+          - id: glm-4-plus
+            input: [text, image]
+      moonshot:
+        displayName: Moonshot
+        api: openai-completions
+        baseURL: https://api.moonshot.cn/v1
+        apiKeyEnv: MOONSHOT_API_KEY
+        models:
+          - id: moonshot-v1-128k
+            input: [text]
+      siliconflow:
+        displayName: SiliconFlow
+        api: openai-completions
+        baseURL: https://api.siliconflow.cn/v1
+        apiKeyEnv: SILICONFLOW_API_KEY
+        models:
+          - id: deepseek-ai/DeepSeek-V3
+            input: [text]
+      openrouter:
+        displayName: OpenRouter
+        api: openai-completions
+        baseURL: https://openrouter.ai/api/v1
+        apiKeyEnv: OPENROUTER_API_KEY
+        models:
+          - id: anthropic/claude-sonnet-4.5
+            input: [text, image]
+      ollama:
+        displayName: Ollama 本地
+        api: openai-completions
+        baseURL: http://127.0.0.1:11434/v1
+        compat: { supportsDeveloperRole: false, maxTokensField: max_tokens }
+        models:
+          - id: 'qwen2.5:14b'
+            input: [text]
