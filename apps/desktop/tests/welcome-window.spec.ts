@@ -45,9 +45,6 @@ const operations = {
   startSignIn: async () => ({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out' as const, attempt: null }),
   cancelSignIn: async () => ({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out' as const, attempt: null }),
   copySignInLink: async () => undefined,
-  listProviders: () => Promise.resolve([{ id: 'deepseek', name: 'DeepSeek' }]),
-  saveApiKey: (_provider: string, _value: string) => Promise.resolve({ ok: true as const }),
-  skip: () => Promise.resolve(),
 }
 
 describe('desktop welcome window', () => {
@@ -115,36 +112,26 @@ describe('desktop welcome window', () => {
   it('accepts actions only from its own top frame and removes handlers on close', async () => {
     const window = createWindow()
     electron.create.mockReturnValue(window)
-    const saveApiKey = vi.fn(operations.saveApiKey)
-    const skip = vi.fn(operations.skip)
     const copySignInLink = vi.fn(operations.copySignInLink)
+    const cancelSignIn = vi.fn(operations.cancelSignIn)
     const takeNotice = vi.fn(async () => 'session-expired' as const)
-    await openWelcomeWindow(resolveDesktopLocale('en'), { ...operations, saveApiKey, skip, copySignInLink, takeNotice })
+    await openWelcomeWindow(resolveDesktopLocale('en'), { ...operations, copySignInLink, cancelSignIn, takeNotice })
     const own = { sender: window.webContents, senderFrame: window.webContents.mainFrame }
     const take = electron.handlers.get(WELCOME_IPC.takeNotice)!
     await expect(take({ ...own, senderFrame: {} })).rejects.toThrow('unowned frame')
     expect(takeNotice).not.toHaveBeenCalled()
     expect(await take(own)).toBe('session-expired')
     expect(takeNotice).toHaveBeenCalledOnce()
-    const save = electron.handlers.get(WELCOME_IPC.saveApiKey)!
-    await expect(save({ sender: {}, senderFrame: {} }, 'deepseek', 'sk-test')).rejects.toThrow('unowned frame')
-    await expect(save({ ...own, senderFrame: {} }, 'deepseek', 'sk-test')).rejects.toThrow('unowned frame')
-    expect(await save(own, 'deepseek', 'bad key')).toEqual({ ok: false })
-    expect(await save(own, '', 'sk-test')).toEqual({ ok: false })
-    expect(await save(own, 42, 'sk-test')).toEqual({ ok: false })
-    expect(saveApiKey).not.toHaveBeenCalled()
-    expect(await save(own, 'deepseek', 'sk-test')).toEqual({ ok: true })
-    expect(saveApiKey).toHaveBeenCalledExactlyOnceWith('deepseek', 'sk-test')
-    const list = electron.handlers.get(WELCOME_IPC.listProviders)!
-    await expect(list({ ...own, senderFrame: {} })).rejects.toThrow('unowned frame')
-    expect(await list(own)).toEqual([{ id: 'deepseek', name: 'DeepSeek' }])
-    await electron.handlers.get(WELCOME_IPC.skip)!(own)
-    expect(skip).toHaveBeenCalledOnce()
     const copy = electron.handlers.get(WELCOME_IPC.copyLink)!
     await expect(copy({ ...own, senderFrame: {} }, 'attempt')).rejects.toThrow('unowned frame')
     await expect(copy(own, 42)).rejects.toThrow('invalid attempt')
     await copy(own, 'attempt')
     expect(copySignInLink).toHaveBeenCalledExactlyOnceWith('attempt')
+    const cancel = electron.handlers.get(WELCOME_IPC.cancel)!
+    await expect(cancel({ ...own, senderFrame: {} }, 'attempt')).rejects.toThrow('unowned frame')
+    await expect(cancel(own, 42)).rejects.toThrow('invalid attempt')
+    await cancel(own, 'attempt')
+    expect(cancelSignIn).toHaveBeenCalledExactlyOnceWith('attempt')
     window.once.mock.calls[0]![1]()
     expect(electron.handlers.size).toBe(0)
   })
@@ -187,11 +174,9 @@ describe('desktop welcome window', () => {
     expect(electron.handlers.size).toBe(0)
   })
 
-  it('shows the entry after logout only without a separately configured API key', () => {
-    expect(needsWelcome({ loggedIn: true, hasApiKey: false })).toBe(false)
-    expect(needsWelcome({ loggedIn: false, hasApiKey: false })).toBe(true)
-    expect(needsWelcome({ loggedIn: false, hasApiKey: true })).toBe(false)
-    expect(needsWelcome({ loggedIn: true, hasApiKey: true })).toBe(false)
+  it('shows the entry whenever no account is signed in', () => {
+    expect(needsWelcome({ loggedIn: true })).toBe(false)
+    expect(needsWelcome({ loggedIn: false })).toBe(true)
   })
 })
 
@@ -207,11 +192,12 @@ it('accepts only permitted event fields and reads the current policy over IPC', 
   enabled = false
   expect(await policy(own)).toBe(false)
   const report = electron.handlers.get(WELCOME_IPC.analytics)!
-  await report(own, 'auth_page_click', { button_name: 'api-key' })
-  expect(analytics).toHaveBeenLastCalledWith('auth_page_click', { button_name: 'api-key' })
-  await expect(report(own, 'auth_page_click', { button_name: 'api-key', token: 'private' })).rejects.toThrow('invalid analytics')
+  await report(own, 'auth_page_click', { button_name: 'sign_in' })
+  expect(analytics).toHaveBeenLastCalledWith('auth_page_click', { button_name: 'sign_in' })
+  await expect(report(own, 'auth_page_click', { button_name: 'sign_in', token: 'private' })).rejects.toThrow('invalid analytics')
+  await expect(report(own, 'auth_page_click', { button_name: 'api-key' })).rejects.toThrow('invalid analytics')
   await expect(report(own, 'desktop_app_launch', {})).rejects.toThrow('invalid analytics')
   await expect(report(own, 'auth_page_view', null)).rejects.toThrow('invalid analytics')
-  await report(own, 'api_key_save_click', {})
-  expect(analytics).toHaveBeenLastCalledWith('api_key_save_click', {})
+  await report(own, 'auth_page_view', {})
+  expect(analytics).toHaveBeenLastCalledWith('auth_page_view', {})
 })

@@ -44,6 +44,13 @@ it('does not replay an expiry reason from an account snapshot', () => {
   expect(accountView({ ...state, signOutReason: 'expired' })).toEqual(state)
 })
 
+it('forwards only a reported data-root restart', () => {
+  const state = { status: 'signed-out', attempt: null,
+    links: { usageUrl: 'https://platform.deepseek.com/usage', topUpUrl: 'https://platform.deepseek.com/top_up' } }
+  expect(accountView({ ...state, restartRequired: true })).toEqual({ ...state, restartRequired: true })
+  expect(accountView({ ...state, restartRequired: false })).not.toHaveProperty('restartRequired')
+})
+
 it('receives live expiry separately from account snapshots', async () => {
   const server = new WebSocketServer({ host: '127.0.0.1', port: 0 })
   await once(server, 'listening')

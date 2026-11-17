@@ -76,7 +76,7 @@ export class DesktopPlatformView {
    * @param bounds - owned renderer rectangle.
    * @returns when loading finishes, or without a document when superseded or the owner closes or navigates.
    */
-  async open(owner: PlatformOwner, page: 'usage' | 'top-up', bounds: PlatformBounds): Promise<void> {
+  async open(owner: PlatformOwner, page: 'usage', bounds: PlatformBounds): Promise<void> {
     if (this.disposed) throw new Error('Platform view disposed')
     this.close()
     const account = this.account
@@ -141,7 +141,7 @@ export class DesktopPlatformView {
       nodeIntegration: false, webSecurity: true,
     } })
     this.view = view
-    // External payment and documentation pages open without the embedded session or token.
+    // External links open in the OS browser without the embedded session or token.
     view.webContents.setWindowOpenHandler(({ url }) => {
       const destination = new URL(url)
       if (destination.protocol === 'https:' && !destination.username && !destination.password) {
@@ -166,7 +166,7 @@ export class DesktopPlatformView {
     owner.contentView.addChildView(view)
     view.setBounds(bounds)
     try {
-      const url = new URL(page === 'usage' ? '/usage' : '/top_up', account.origin)
+      const url = new URL(`/${page}`, account.origin)
       if (account.embeddedPageDist) url.searchParams.set('dist', account.embeddedPageDist)
       await view.webContents.loadURL(url.href)
     } catch (error) {

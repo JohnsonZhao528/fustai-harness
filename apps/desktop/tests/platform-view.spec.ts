@@ -100,8 +100,8 @@ it('destroys old documents on sign-out or credential replacement', async () => {
   manager.setSession({ origin: 'https://platform.deepseek.com', userId: 'fixture-user' as AccountUserId, token: 'replacement' })
   expect(first.close).toHaveBeenCalledOnce()
   expect(() => manager.bootstrap({ sender: first, senderFrame: first.mainFrame })).toThrow()
-  await manager.open(owner, 'top-up', bounds)
-  expect(view().webContents.loadURL).toHaveBeenCalledWith('https://platform.deepseek.com/top_up')
+  await manager.open(owner, 'usage', bounds)
+  expect(view().webContents.loadURL).toHaveBeenCalledWith('https://platform.deepseek.com/usage')
   const second = view().webContents
   manager.setSession(null)
   expect(second.close).toHaveBeenCalledOnce()
@@ -127,7 +127,7 @@ it('blocks cross-origin navigation and redirects', async () => {
     view().webContents.emit(name, event, 'https://platform.deepseek.com.evil/usage')
     expect(event.preventDefault).toHaveBeenCalledOnce()
     event.preventDefault.mockClear()
-    view().webContents.emit(name, event, 'https://platform.deepseek.com/top_up')
+    view().webContents.emit(name, event, 'https://platform.deepseek.com/usage')
     expect(event.preventDefault).not.toHaveBeenCalled()
   }
   manager.close()
@@ -174,14 +174,14 @@ it.each([null, {}, { ...bounds, width: NaN }, { ...bounds, x: -1 }, { ...bounds,
   expect(() => platformBounds(value)).toThrow()
 })
 
-it('opens HTTPS payment links in the system browser without an embedded child window', async () => {
+it('opens external HTTPS links in the system browser without an embedded child window', async () => {
   const { manager, owner } = setup()
-  await manager.open(owner, 'top-up', bounds)
+  await manager.open(owner, 'usage', bounds)
   const handler = view().webContents.setWindowOpenHandler.mock.calls[0]![0] as (details: { url: string }) => { action: string }
-  expect(handler({ url: 'https://payment.example/order' })).toEqual({ action: 'deny' })
-  expect(state.openExternal).toHaveBeenCalledWith('https://payment.example/order')
+  expect(handler({ url: 'https://docs.example/guide' })).toEqual({ action: 'deny' })
+  expect(state.openExternal).toHaveBeenCalledWith('https://docs.example/guide')
   vi.mocked(state.openExternal).mockClear()
-  for (const url of ['file:///tmp/test', 'javascript:alert(1)', 'https://user:pass@payment.example/order']) {
+  for (const url of ['file:///tmp/test', 'javascript:alert(1)', 'https://user:pass@docs.example/guide']) {
     expect(handler({ url })).toEqual({ action: 'deny' })
   }
   expect(state.openExternal).not.toHaveBeenCalled()
@@ -226,7 +226,7 @@ it('injects deployment headers only at the Platform origin and excludes them fro
     callback: (value: { requestHeaders: Record<string, string> }) => void,
   ) => void
   const callback = vi.fn()
-  for (const path of ['/usage', '/top_up', '/api/v0/users/get_user_summary']) {
+  for (const path of ['/usage', '/api/v0/users/get_user_summary']) {
     intercept({ id: 1, url: `https://platform.deepseek.com${path}`, requestHeaders: { Cookie: 'route=old; browser=keep', Accept: 'application/json' } }, callback)
     expect(callback).toHaveBeenLastCalledWith({ requestHeaders: {
       cookie: 'route=new; browser=keep; gate=private', accept: 'application/json', 'x-private-gate': 'private', 'x-client-platform': 'desktop-mac',
@@ -246,13 +246,13 @@ it('injects deployment headers only at the Platform origin and excludes them fro
   manager.close()
 })
 
-it.each(['usage', 'top-up'] as const)('selects the configured frontend deployment for %s', async (page) => {
+it('selects the configured frontend deployment for the usage page', async () => {
   const { manager, owner } = setup()
   manager.setSession({ origin: 'https://platform.deepseek.com', userId: 'fixture-user' as AccountUserId, token: 'fixture-secret', embeddedPageDist: 'feat/test&other=value' })
-  await manager.open(owner, page, bounds)
+  await manager.open(owner, 'usage', bounds)
   const url = new URL(view().webContents.loadURL.mock.calls[0]![0] as string)
   expect(url.origin).toBe('https://platform.deepseek.com')
-  expect(url.pathname).toBe(page === 'usage' ? '/usage' : '/top_up')
+  expect(url.pathname).toBe('/usage')
   expect([...url.searchParams]).toEqual([['dist', 'feat/test&other=value']])
   const previous = view().webContents
   manager.setSession({ origin: 'https://platform.deepseek.com', userId: 'fixture-user' as AccountUserId, token: 'fixture-secret', embeddedPageDist: 'another' })
@@ -299,7 +299,7 @@ it('does not reveal a pending view after the owner reloads or remove a replaceme
   const previous = view()
   owner.webContents.emit('did-start-navigation', {}, 'dsh-app://app/', false, true)
   state.loadBarrier = undefined
-  await manager.open(owner, 'top-up', bounds)
+  await manager.open(owner, 'usage', bounds)
   const current = view()
   loaded.resolve(undefined)
   await loading
@@ -328,7 +328,7 @@ it('bootstraps the current language and updates an open view without reloading',
   sender.send.mockClear()
   manager.notifyLocaleChanged()
   expect(sender.send).not.toHaveBeenCalled()
-  await manager.open(owner, 'top-up', bounds)
+  await manager.open(owner, 'usage', bounds)
   const reopened = view().webContents
   expect(manager.bootstrap({ sender: reopened, senderFrame: reopened.mainFrame }).locale).toBe('en_US')
   manager.close()
@@ -357,7 +357,7 @@ it('reuses persistent storage across closes, token replacement, and manager recr
   expect(first.partition).not.toContain('fixture-user')
   expect(first.partition).not.toContain('fixture-secret')
   manager.close()
-  await manager.open(owner, 'top-up', bounds)
+  await manager.open(owner, 'usage', bounds)
   expect(browserSession().partition).toBe(first.partition)
   expect(first.flushStorageData).toHaveBeenCalledOnce()
   expect(first.clearStorageData).toHaveBeenCalledWith({ storages: ['cookies', 'filesystem', 'indexdb', 'shadercache', 'serviceworkers', 'cachestorage'] })
@@ -417,12 +417,12 @@ it('waits for authentication cleanup before reopening and ignores superseded ope
   browserSession().clearStorageData.mockReturnValueOnce(cleared.promise)
   manager.close()
   const obsolete = manager.open(owner, 'usage', bounds)
-  const current = manager.open(owner, 'top-up', bounds)
+  const current = manager.open(owner, 'usage', bounds)
   expect(state.views).toHaveLength(1)
   cleared.resolve(undefined)
   await Promise.all([obsolete, current])
   expect(state.views).toHaveLength(2)
-  expect(view().webContents.loadURL).toHaveBeenCalledWith('https://platform.deepseek.com/top_up')
+  expect(view().webContents.loadURL).toHaveBeenCalledWith('https://platform.deepseek.com/usage')
   manager.close()
 })
 

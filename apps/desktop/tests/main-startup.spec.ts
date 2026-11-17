@@ -133,7 +133,7 @@ const harness = await vi.hoisted(async () => {
     readonly updateTasks = vi.fn(async (_action: 'inspect' | 'lock' | 'unlock') => false)
     readonly inspectQuit = vi.fn(async () => ({ activeTasks: false, scheduledTasks: false }))
     url = 'http://127.0.0.1:3080/?token=test'
-    fetch = vi.fn(async () => Response.json({ hasApiKey: true, writable: true, localePreference: null }))
+    fetch = vi.fn(async () => Response.json({ loggedIn: true, hasApiKey: true, localePreference: null }))
     readonly ready = deferred()
     readonly exited = deferred()
     readonly stopping = deferred()
@@ -367,7 +367,6 @@ vi.mock('../src/welcome-backend.ts', () => ({
     report: harness.analytics,
     readLocalePreference: async () => null,
     read: async (): Promise<unknown> => (await harness.hosts.at(-1)!.fetch()).json() as Promise<unknown>,
-    save: async () => ({ ok: true }),
     account: { watch: harness.watchAccount, state: async () => ({ status: 'signed-out', attempt: null }) },
   }),
 }))
@@ -1578,7 +1577,11 @@ describe('desktop main startup', () => {
     const checked = Promise.withResolvers<DesktopUpdateState>()
     const checking = Promise.withResolvers<AbortSignal>()
     const requested = Promise.withResolvers<undefined>()
-    harness.updateCheck.mockImplementationOnce(() => { requested.resolve(undefined); return checked.promise })
+    harness.updateCheck.mockImplementationOnce(() => {
+      harness.updateState = { phase: 'checking' }
+      requested.resolve(undefined)
+      return checked.promise
+    })
     harness.dialog.showMessageBox.mockImplementationOnce(({ signal }: { signal: AbortSignal }) => {
       checking.resolve(signal)
       return new Promise((resolve) => { signal.addEventListener('abort', () => { resolve({ response: 0 }) }, { once: true }) })
@@ -1591,11 +1594,14 @@ describe('desktop main startup', () => {
     expect(action?.click).toBeTypeOf('function')
     // Electron supplies menu arguments that this callback does not consume.
     Reflect.apply(action!.click!, undefined, [])
-    const prompt = Promise.resolve(invoke(DESKTOP_IPC.updatesOpen, 'app'))
     const signal = await checking.promise
     await requested.promise
+    // The joined click answers with a notice while the shared checking dialog stays open.
+    const prompt = Promise.resolve(invoke(DESKTOP_IPC.updatesOpen, 'app'))
+    await vi.advanceTimersByTimeAsync(0)
     expect(signal.aborted).toBe(false)
-    expect(harness.dialog.showMessageBox).toHaveBeenCalledTimes(1)
+    expect(harness.dialog.showMessageBox).toHaveBeenCalledTimes(2)
+    expect(harness.dialog.showMessageBox).toHaveBeenLastCalledWith(expect.objectContaining({ message: en.updateChecking }))
     expect(harness.updateCheck).toHaveBeenLastCalledWith(true)
     checked.resolve({ phase: 'idle' })
     await prompt
@@ -1730,14 +1736,16 @@ describe('desktop main startup', () => {
     const downloading = Promise.withResolvers<DesktopUpdateState>()
     const started = Promise.withResolvers<undefined>()
     harness.updateDownload.mockImplementationOnce(async (version) => {
-      harness.updateState = { phase: 'downloading', version }
+      harness.updateState = { phase: 'downloading', version, percent: 42 }
       started.resolve(undefined)
       return downloading.promise
     })
     const action = invoke(DESKTOP_IPC.updatesOpen, 'app')
     await started.promise
     const repeated = invoke(DESKTOP_IPC.updatesOpen, 'app')
-    expect(harness.dialog.showMessageBox).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(harness.dialog.showMessageBox).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Downloading 42%…',
+    })))
     expect(harness.updateDownload).toHaveBeenCalledExactlyOnceWith('1.0.1-nightly.1')
     expect(harness.updateInstall).not.toHaveBeenCalled()
     downloading.resolve({ phase: 'ready', version: '1.0.1-nightly.1' })
@@ -2346,6 +2354,53 @@ it.each(['failed', 'expired'] as const)('focuses DSH once when browser authoriza
   harness.publishAccount(state)
   harness.publishAccount(state)
   expect(window.focus).toHaveBeenCalledTimes(1)
+})
+
+it('offers a data-root restart once per run when the account declines it', async () => {
+  await import('../src/main.ts')
+  await harness.preparing.promise
+  harness.prepared.resolve()
+  await harness.hostStarted.promise
+  harness.hosts[0]!.ready.resolve()
+  await Promise.resolve(invoke(DESKTOP_IPC.boot))
+  const state: AccountView = {
+    status: 'signed-out', restartRequired: true, attempt: null,
+    links: { usageUrl: 'https://platform.deepseek.com/usage', topUpUrl: 'https://platform.deepseek.com/top_up' },
+  }
+  harness.dialog.showMessageBox.mockResolvedValueOnce({ response: 1 })
+  harness.publishAccount(state)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(harness.dialog.showMessageBox.mock.lastCall?.at(-1)).toMatchObject({
+    title: en.accountRootRestartTitle, detail: en.accountRootRestartDetail,
+    buttons: [en.accountRootRestartNow, en.accountRootRestartLater],
+  })
+  expect(harness.app.relaunch).not.toHaveBeenCalled()
+  // A restart this process cannot perform stays offered once; the next frame of the same root adds no prompt.
+  harness.dialog.showMessageBox.mockClear()
+  harness.publishAccount(state)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(harness.dialog.showMessageBox).not.toHaveBeenCalled()
+})
+
+it('relaunches without a quit confirmation when the data-root restart is accepted', async () => {
+  await import('../src/main.ts')
+  await harness.preparing.promise
+  harness.prepared.resolve()
+  await harness.hostStarted.promise
+  const host = harness.hosts[0]!
+  host.ready.resolve()
+  await Promise.resolve(invoke(DESKTOP_IPC.boot))
+  harness.dialog.showMessageBox.mockResolvedValueOnce({ response: 0 })
+  harness.publishAccount({
+    status: 'signed-out', restartRequired: true, attempt: null,
+    links: { usageUrl: 'https://platform.deepseek.com/usage', topUpUrl: 'https://platform.deepseek.com/top_up' },
+  })
+  await vi.advanceTimersByTimeAsync(0)
+  expect(harness.app.relaunch).toHaveBeenCalledOnce()
+  await host.stopping.promise
+  host.exited.resolve()
+  await harness.quitCompleted.promise
+  expect(harness.dialog.showMessageBox).toHaveBeenCalledOnce()
 })
 
 it.each([['light', false], ['dark', true]] as const)('opens Platform authorization in the effective %s palette', async (theme, shouldUseDarkColors) => {

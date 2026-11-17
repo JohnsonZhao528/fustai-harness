@@ -83,7 +83,7 @@ async function mockPlatform() {
 }
 
 describe.skipIf(!existsSync(builtHost))('built Desktop welcome flow', () => {
-  it('persists explicit API keys and browser account login independently across Host restarts', async () => {
+  it('carries browser account login across Host restarts without writing a credential', async () => {
     vi.stubEnv('DSH_CLIENT_VERSION', '1.2.3')
     const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-welcome-'))
     let host: DesktopHostProcess | undefined
@@ -155,10 +155,6 @@ describe.skipIf(!existsSync(builtHost))('built Desktop welcome flow', () => {
       await restart()
       expect(await status()).toMatchObject({ hasApiKey: false, localePreference: 'zh' })
       expect(fingerprint()).toBe(before)
-      expect(await backend!.save('deepseek', 'sk-local-onboarding-test')).toEqual({ ok: true })
-      expect(await status()).toMatchObject({ hasApiKey: true, localePreference: 'zh' })
-      await restart()
-      expect(await status()).toMatchObject({ hasApiKey: true })
       await backend!.account.start(desktopClientMetadata('en'))
       await expect.poll(async () => (await backend!.account.state()).attempt?.phase).toBe('waiting-browser')
       expect(new URL(platform.callback()).origin).toBe(hostOrigin)
@@ -166,19 +162,19 @@ describe.skipIf(!existsSync(builtHost))('built Desktop welcome flow', () => {
       const failed = await fetch(platform.callback(), { redirect: 'manual' })
       expect(failed.status).toBe(204)
       expect(await backend!.account.state()).toMatchObject({ status: 'signed-out', attempt: { phase: 'failed' } })
-      expect(await status()).toMatchObject({ hasApiKey: true, loggedIn: false })
+      expect(await status()).toMatchObject({ hasApiKey: false, loggedIn: false })
       platform.failExchange(false)
       await backend!.account.start(desktopClientMetadata('en'))
       await expect.poll(async () => (await backend!.account.state()).attempt?.phase).toBe('waiting-browser')
       const response = await fetch(platform.callback(), { redirect: 'manual' })
       expect(response.status).toBe(302)
       expect(response.headers.get('location')).toBe(`${platform.origin}/dsh/authorized?result=test&locale=zh_CN&login_source=desktop`)
-      expect(await status()).toMatchObject({ hasApiKey: true, loggedIn: true })
+      expect(await status()).toMatchObject({ hasApiKey: false, loggedIn: true })
       await restart()
-      expect(await status()).toMatchObject({ hasApiKey: true, loggedIn: true })
+      expect(await status()).toMatchObject({ hasApiKey: false, loggedIn: true })
       // A failed remote logout must not block local sign-out through the real Host composition.
       await backend!.account.signOut(desktopClientMetadata('en'))
-      expect(await status()).toMatchObject({ hasApiKey: true, loggedIn: false })
+      expect(await status()).toMatchObject({ hasApiKey: false, loggedIn: false })
       await backend!.account.start(desktopClientMetadata('en'))
       await expect.poll(async () => (await backend!.account.state()).attempt?.phase).toBe('waiting-browser')
       const waiting = await backend!.account.state()

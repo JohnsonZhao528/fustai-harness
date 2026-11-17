@@ -6,9 +6,13 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
+  readdirSync,
   realpathSync,
   closeSync,
   readFileSync,
+  rmSync,
+  rmdirSync,
+  statSync,
   unlinkSync,
   writeFileSync,
   writeSync,
@@ -24,13 +28,23 @@ import type { DesktopRelease } from './release.ts'
 import { readDesktopRuntime } from './runtime-tree.ts'
 import { seedProviderRoutes } from './provider-seed.ts'
 import {
-  initProfile, PROFILE_TEMPLATES, removeLinkProjections, sanitizeProfile, type ProfileTemplate,
+  initProfile, PROFILE_TEMPLATES, readProfileManifest, removeLinkProjections, sanitizeProfile, writeProfileBundles,
+  type ProfileTemplate,
 } from '@deepseek-ai/dsh-app-boot'
 
 const PROJECT_NAME = '@deepseek-ai/dsh-desktop-runtime'
 const DSH_PACKAGE = '@deepseek-ai/dsh'
 const CORE_BUILD_PACKAGE = '@deepseek-ai/dsh-subprocess-local'
 const WEB_PROFILE = PROFILE_TEMPLATES.web as ProfileTemplate
+/** Shipped bundle that adds the desktop "Mobile" settings page and the mobile remote-control service. */
+const MOBILE_BUNDLE = 'dsh-mobile'
+/** Vendored mobile plugin staged beside the runtime project metadata. */
+export const MOBILE_VENDOR_DIR = 'vendor/dsh-mobile'
+/** Bundle shipped by earlier releases; the newer {@link MOBILE_BUNDLE} replaces it. */
+const LEGACY_MOBILE_BUNDLE = 'dsh-plugin-mobile-gateway'
+const DESKTOP_BUNDLES = [...WEB_PROFILE.bundles, MOBILE_BUNDLE]
+/** Shipped bundles copied into the profile because the loader resolves them from disk, not from `app.asar`. */
+const BUNDLED_PLUGIN_PACKAGES = [MOBILE_BUNDLE]
 const WORKSPACE_SETTINGS = 'nodeLinker: hoisted\nautoInstallPeers: false\n'
 function writeJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, undefined, 2)}\n`, { mode: 0o600 })
@@ -75,7 +89,7 @@ export class DesktopProjectManager {
    * @returns Backup path after the locked profile write, or undefined if the patch was absent.
    */
   async disableAllPlugins(): Promise<string | undefined> {
-    return this.withLock(() => sanitizeProfile('dsh', this.paths.profile, WEB_PROFILE.bundles))
+    return this.withLock(() => sanitizeProfile('dsh', this.paths.profile, DESKTOP_BUNDLES))
   }
 
   /**
@@ -86,6 +100,7 @@ export class DesktopProjectManager {
       // Validation only: an unreadable or mismatched runtime descriptor stops preparation before the Host starts.
       readDesktopRuntime(this.runtime.dsh)
       migrateProfileSettings(this.paths.profile)
+      materializeBundledPlugins(this.runtime.dsh, this.paths.profile)
       createPluginProfile(this.paths.profile)
       seedProviderRoutes(this.paths.profile)
       removeLinkProjections(this.paths.profile)
@@ -140,8 +155,11 @@ export function createRuntimeProjectMetadata(projectDir: string, release: Deskto
     name: PROJECT_NAME,
     private: true,
     version: '0.0.0',
-    dependencies: desktopCorePackageOverrides(packageSet),
-    dsh: { profile: { bundles: [...WEB_PROFILE.bundles] } },
+    dependencies: {
+      ...desktopCorePackageOverrides(packageSet),
+      [MOBILE_BUNDLE]: `file:./${MOBILE_VENDOR_DIR}`,
+    },
+    dsh: { profile: { bundles: [...DESKTOP_BUNDLES] } },
   }
   writeJson(join(projectDir, 'package.json'), manifest)
   writeFileSync(
@@ -166,13 +184,76 @@ export function createDevelopmentProjectMetadata(projectDir: string, release: De
       [DSH_PACKAGE]: release.version,
       [DESKTOP_HOST_PACKAGE]: release.version,
     },
-    dsh: { profile: { bundles: [...WEB_PROFILE.bundles] } },
+    dsh: { profile: { bundles: [...DESKTOP_BUNDLES] } },
   }
   writeJson(join(projectDir, 'package.json'), manifest)
   writeFileSync(join(projectDir, 'pnpm-workspace.yaml'), workspaceFile(), { mode: 0o600 })
 }
 
+/**
+ * Activate the shipped mobile bundle in a profile created by an earlier release, and retire the bundle it replaces.
+ * The retired package's `file:` dependency is dropped because its vendored directory no longer ships.
+ * @param projectDir - Desktop profile directory holding the profile manifest.
+ */
+function enableDesktopBundles(projectDir: string): void {
+  const manifest = readProfileManifest('dsh', projectDir)
+  const bundles = manifest.dsh?.profile?.bundles ?? []
+  const retired = bundles.includes(LEGACY_MOBILE_BUNDLE) || manifest.dependencies?.[LEGACY_MOBILE_BUNDLE] !== undefined
+  if (!retired && (bundles.includes(MOBILE_BUNDLE) || manifest.dependencies?.[MOBILE_BUNDLE] !== undefined)) return
+  const next = bundles.filter(bundle => bundle !== LEGACY_MOBILE_BUNDLE)
+  if (!next.includes(MOBILE_BUNDLE)) next.push(MOBILE_BUNDLE)
+  const dependencies = manifest.dependencies === undefined
+    ? undefined
+    : Object.fromEntries(Object.entries(manifest.dependencies).filter(([name]) => name !== LEGACY_MOBILE_BUNDLE))
+  writeProfileBundles(projectDir, dependencies === undefined ? manifest : { ...manifest, dependencies }, next)
+}
+
+/**
+ * Place shipped bundle packages in the profile's `node_modules`.
+ * The loader resolves bundle entries with Node's module lookup from the profile directory, so a package that
+ * exists only inside `app.asar` never mounts; copying keeps the shipped gateway loadable without a package install.
+ * @param runtimeDsh - directory of the shipped `dsh` runtime tree.
+ * @param projectDir - Desktop profile directory.
+ */
+function materializeBundledPlugins(runtimeDsh: string, projectDir: string): void {
+  for (const name of BUNDLED_PLUGIN_PACKAGES) {
+    const source = join(runtimeDsh, 'node_modules', name)
+    const sourceManifest = join(source, 'package.json')
+    if (!existsSync(sourceManifest)) continue
+    const target = join(projectDir, 'node_modules', name)
+    if (packageVersion(join(target, 'package.json')) === packageVersion(sourceManifest)) continue
+    mkdirSync(join(projectDir, 'node_modules'), { recursive: true, mode: 0o700 })
+    removeEntry(target)
+    copyTree(source, target)
+  }
+}
+
+function packageVersion(manifestPath: string): string | undefined {
+  if (!existsSync(manifestPath)) return undefined
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { version?: unknown }
+  return typeof manifest.version === 'string' ? manifest.version : undefined
+}
+
+function removeEntry(path: string): void {
+  const entry = lstatSync(path, { throwIfNoEntry: false })
+  if (entry === undefined) return
+  // Junctions and symlinks point at user-chosen directories; remove the link itself, never its target.
+  if (entry.isSymbolicLink()) rmdirSync(path)
+  else rmSync(path, { recursive: true, force: true })
+}
+
+function copyTree(source: string, target: string): void {
+  mkdirSync(target, { recursive: true, mode: 0o700 })
+  for (const name of readdirSync(source)) {
+    const from = join(source, name)
+    const to = join(target, name)
+    if (statSync(from).isDirectory()) copyTree(from, to)
+    else writeFileSync(to, readFileSync(from), { mode: 0o600 })
+  }
+}
+
 /** Create the first external plugin profile without running a package manager. */
 export function createPluginProfile(projectDir: string): void {
-  initProfile(projectDir, WEB_PROFILE.bundles)
+  initProfile(projectDir, DESKTOP_BUNDLES)
+  enableDesktopBundles(projectDir)
 }

@@ -41,6 +41,7 @@ export function accountView(value: unknown): AccountView {
       ...parsed.attempt.expiresAt === undefined ? {} : { expiresAt: parsed.attempt.expiresAt },
       ...parsed.attempt.errorCode === undefined ? {} : { errorCode: parsed.attempt.errorCode },
     },
+    ...parsed.restartRequired === true ? { restartRequired: true } : {},
   }
 }
 

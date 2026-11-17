@@ -418,6 +418,27 @@ async function main(): Promise<void> {
   let returnedAttempt: string | undefined
   let pendingWelcomeNotice: WelcomeNotice | undefined
   let previousAccountStatus: string | undefined
+  let rootRestartOffered = false
+  // A sign-in that selected another account's data root takes effect only in a new Host process, so
+  // this one offers the restart once per run and keeps serving its own root when declined.
+  const offerAccountRootRestart = async (): Promise<void> => {
+    const messages = locale.messages
+    const options = {
+      type: 'question',
+      buttons: [messages.accountRootRestartNow, messages.accountRootRestartLater],
+      defaultId: 0,
+      noLink: true,
+      title: messages.accountRootRestartTitle,
+      message: messages.accountRootRestartTitle,
+      detail: messages.accountRootRestartDetail,
+    } satisfies Electron.MessageBoxOptions
+    const owner = mainWindow !== undefined && !mainWindow.isDestroyed() ? mainWindow
+      : welcomeWindow !== undefined && !welcomeWindow.isDestroyed() ? welcomeWindow : undefined
+    const choice = await (owner === undefined ? dialog.showMessageBox(options) : dialog.showMessageBox(owner, options))
+    if (choice.response !== 0) return
+    app.relaunch()
+    quitWithoutConfirmation()
+  }
   const assertProductSender = (event: IpcMainInvokeEvent): void => {
     assertDesktopSender(event, ['app'])
     if (mainWindow === undefined || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents
@@ -482,6 +503,10 @@ async function main(): Promise<void> {
               }
               return undefined
             }).catch(() => undefined)
+          }
+          if (state.restartRequired === true && !rootRestartOffered) {
+            rootRestartOffered = true
+            void offerAccountRootRestart().catch(() => undefined)
           }
           previousAccountStatus = state.status
         }, () => {
@@ -737,7 +762,7 @@ async function main(): Promise<void> {
   })
   ipcMain.handle(PLATFORM_IPC.open, (event, page: unknown, bounds: unknown) => {
     const owner = assertMainApplication(event)
-    if (page !== 'usage' && page !== 'top-up') throw new Error('Invalid Platform page')
+    if (page !== 'usage') throw new Error('Invalid Platform page')
     return platformView.open(owner, page, platformBounds(bounds))
   })
   ipcMain.handle(PLATFORM_IPC.bounds, (event, bounds: unknown) => {
@@ -797,11 +822,33 @@ async function main(): Promise<void> {
     await openUpdatePrompt()
   })
 
+  /** Localized in-progress copy for a busy update phase; undefined for phases that surface their own dialog. */
+  const busyUpdateMessage = (state: DesktopUpdateState): string | undefined => {
+    switch (state.phase) {
+      case 'checking': return locale.messages.updateChecking
+      case 'downloading': return formatDesktopMessage(locale.messages.updateDownloading, { percent: String(Math.round(state.percent ?? 0)) })
+      case 'verifying': return locale.messages.updateVerifying
+      case 'installing': return locale.messages.updateInstalling
+      default: return undefined
+    }
+  }
+  const showBusyUpdateNotice = (state: DesktopUpdateState): Promise<unknown> => {
+    const message = busyUpdateMessage(state)
+    if (message === undefined) return Promise.resolve()
+    return ordinaryMessageBox({ type: 'info', title: locale.messages.updateCheckTitle, message,
+      buttons: [locale.messages.updateAcknowledge], cancelId: 0 })
+  }
   let promptOperation: Promise<void> | undefined
   let policyAuthenticationQueued = false
   const openUpdatePrompt = (manual = false): Promise<void> => {
     if (authenticationOperation !== undefined) {
       policyAuth?.focus(); updateDialog.focus()
+    }
+    if (promptOperation !== undefined) {
+      // Every entry point is a user click: the pending prompt owns the dialog for available/ready
+      // phases, so only the silently running phases need a notice here.
+      showBusyUpdateNotice(updates.state).catch((error: unknown) => { console.error(error) })
+      return promptOperation
     }
     let failedOperation: 'check' | 'download' | 'install' = 'check'
     promptOperation ??= Promise.resolve().then(async () => {
@@ -843,7 +890,12 @@ async function main(): Promise<void> {
           }
           return
         }
-        if (state.phase !== 'available' && !(state.phase === 'error' && state.failedOperation === 'download')) return
+        if (state.phase !== 'available' && !(state.phase === 'error' && state.failedOperation === 'download')) {
+          controller?.abort()
+          await progress
+          await showBusyUpdateNotice(state)
+          return
+        }
         if (manual) {
           const result = await ordinaryMessageBox({ title: locale.messages.updateCheckTitle,
             message: formatDesktopMessage(locale.messages.updateAvailable, { version: state.version ?? '' }),
@@ -1176,18 +1228,6 @@ async function main(): Promise<void> {
           }
           await clipboard.writeText(platformLoginUrl(state.attempt.authorizeUrl))
         },
-        listProviders: async () => {
-          if (backend.host === undefined || welcomeBackend === undefined) return []
-          return welcomeBackend.listProviders()
-        },
-        saveApiKey: async (provider, apiKey) => {
-          if (backend.host === undefined || welcomeBackend === undefined) return { ok: false }
-          const saved = await welcomeBackend.save(provider, apiKey)
-          if (!saved.ok) return saved
-          await enterWorkspace()
-          return { ok: true }
-        },
-        skip: enterWorkspace,
       })
       const window = welcomeWindow
       window.once('closed', () => {
@@ -1216,7 +1256,7 @@ async function main(): Promise<void> {
     locale = resolveDesktopStartupLocale(state.localePreference, systemLanguages)
     windowsLanguage = locale.id
     refreshApplicationMenu()
-    if (!enteredWorkspace && needsWelcome({ loggedIn: state.loggedIn, hasApiKey: state.hasApiKey })) {
+    if (!enteredWorkspace && needsWelcome(state)) {
       // A later login must retain its own activation policy instead of replaying startup focus.
       raiseAfterUpdate = false
       await showWelcome()

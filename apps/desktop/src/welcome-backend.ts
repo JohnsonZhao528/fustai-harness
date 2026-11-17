@@ -3,13 +3,11 @@ import type { ProductEvent } from '@deepseek-ai/dsh-client-product-analytics/typ
 
 import { randomUUID } from 'node:crypto'
 import { desktopAccountBackend, type DesktopAccountBackend } from './account-backend.ts'
-import type { WelcomeProvider } from './welcome-api.ts'
 
 /** Metadata needed before the native entry or workspace becomes visible. */
 export interface WelcomeState {
   readonly loggedIn: boolean
   readonly hasApiKey: boolean
-  readonly writable: boolean
   readonly localePreference: string | null
 }
 
@@ -20,18 +18,10 @@ export interface DesktopWelcomeBackend {
   readonly account: DesktopAccountBackend
   /** @param event - desktop-owned fields. @returns after local Host intake. */
   report(event: ProductEvent): Promise<void>
-  /** @returns Configured-key presence and the shared language preference, without credential values. */
+  /** @returns Account sign-in state, configured-key presence, and the shared language preference, without credential values. */
   read(): Promise<WelcomeState>
   /** @returns The saved UI language without account or provider requests. */
   readLocalePreference(): Promise<string | null>
-  /** @returns Provider routes that accept an API key, in catalog order. */
-  listProviders(): Promise<readonly WelcomeProvider[]>
-  /**
-   * @param provider - provider id selected from listProviders.
-   * @param apiKey - User-entered provider key.
-   * @returns A safe write outcome without provider diagnostics.
-   */
-  save(provider: string, apiKey: string): Promise<{ ok: boolean }>
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -42,7 +32,7 @@ function record(value: unknown): value is Record<string, unknown> {
  * Authenticate the native HTTP client through the Web application's launch URL.
  * @param authenticatedUrl - URL supplied by the running Desktop Host.
  * @param send - Electron session fetch, retaining the Web authentication cookie.
- * @returns metadata reads and write-only credential operations over standard RPC.
+ * @returns metadata reads over standard RPC.
  */
 export async function connectDesktopWelcome(
   authenticatedUrl: string,
@@ -75,8 +65,7 @@ export async function connectDesktopWelcome(
   const account = desktopAccountBackend(origin, invoke, cookies)
   /**
    * Resolve each configurable provider's credential reference from the catalog.
-   * @returns Public provider entries paired with their stored-key reference,
-   * plus the settings namespaces for the locale read.
+   * @returns Stored-key references and the settings namespaces for the locale read.
    */
   const keyTargets = async () => {
     const settings = await invoke({ namespace: 'settings', method: 'describe', args: {} })
@@ -84,8 +73,8 @@ export async function connectDesktopWelcome(
     const namespaces = settings.namespaces
     const providers = await invoke({ namespace: 'llm', method: 'listConfigurableProviders', args: {} })
     if (!Array.isArray(providers)) throw new Error('desktop welcome: invalid provider directory')
-    const targets = providers.flatMap((provider: unknown) => {
-      if (!record(provider) || typeof provider.provider !== 'string' || typeof provider.displayName !== 'string'
+    const refs = providers.flatMap((provider: unknown) => {
+      if (!record(provider) || typeof provider.provider !== 'string'
         || typeof provider.settingsNs !== 'string' || !Array.isArray(provider.settingsPath)) {
         throw new Error('desktop welcome: invalid provider settings address')
       }
@@ -95,11 +84,9 @@ export async function connectDesktopWelcome(
         if (typeof key !== 'string') throw new Error('desktop welcome: invalid provider settings path')
         value = record(value) ? value[key] : undefined
       }
-      return record(value) && typeof value.apiKeyEnv === 'string'
-        ? [{ provider: { id: provider.provider, name: provider.displayName }, ref: value.apiKeyEnv }]
-        : []
+      return record(value) && typeof value.apiKeyEnv === 'string' ? [value.apiKeyEnv] : []
     })
-    return { namespaces, targets }
+    return { namespaces, refs }
   }
   const localePreference = (namespaces: unknown[]): string | null => {
     const locale: unknown = namespaces.find((item: unknown) => record(item) && item.ns === 'locale')
@@ -110,8 +97,8 @@ export async function connectDesktopWelcome(
     return locale.value.preference ?? null
   }
   const read = async (): Promise<WelcomeState> => {
-    const { namespaces, targets } = await keyTargets()
-    const unique = [...new Set(targets.map(target => target.ref))]
+    const { namespaces, refs } = await keyTargets()
+    const unique = [...new Set(refs)]
     const states: Record<string, unknown> = {}
     // credentials.describe accepts at most 64 references per request.
     for (let offset = 0; offset < unique.length; offset += 64) {
@@ -123,15 +110,11 @@ export async function connectDesktopWelcome(
     try {
       loggedIn = (await account.state()).status === 'credential-stored'
     } catch (_accountUnavailable: unknown) {
-      // Profiles without the account plugin report no sign-in state; API-key authentication still applies.
+      // A profile without the account plugin reports no sign-in state, so Welcome stays required.
     }
     return {
       loggedIn,
       hasApiKey: Object.values(states).some(value => record(value) && value.configured === true),
-      writable: targets.some((target) => {
-        const state: unknown = states[target.ref]
-        return record(state) && state.writable === true
-      }),
       localePreference: localePreference(namespaces),
     }
   }
@@ -148,22 +131,6 @@ export async function connectDesktopWelcome(
       const settings = await invoke({ namespace: 'settings', method: 'describe', args: {} })
       if (!record(settings) || !Array.isArray(settings.namespaces)) throw new Error('desktop welcome: missing settings namespaces')
       return localePreference(settings.namespaces)
-    },
-    async listProviders() {
-      return (await keyTargets()).targets.map(target => target.provider)
-    },
-    async save(provider, apiKey) {
-      if (!/^[\x21-\x7e]+$/.test(apiKey)) return { ok: false }
-      try {
-        const { targets } = await keyTargets()
-        const target = targets.find(item => item.provider.id === provider)
-        if (target === undefined) return { ok: false }
-        await invoke({ namespace: 'credentials', method: 'set', args: { ref: target.ref, value: apiKey } })
-        return { ok: true }
-      } catch {
-        // Provider diagnostics may contain credentials; the native form owns failure copy.
-        return { ok: false }
-      }
     },
   }
 }

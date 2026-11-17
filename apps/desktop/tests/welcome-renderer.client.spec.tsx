@@ -5,8 +5,8 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { Welcome } from '../src/client/WelcomePage.tsx'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resolveDesktopLocale } from '../src/locale.ts'
-import type { AccountView } from '@deepseek-ai/dsh-deepseek-account/types'
-import type { WelcomeSaveResult, WelcomeNotice, WelcomeProvider } from '../src/welcome-api.ts'
+import type { AccountView, SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
+import type { WelcomeNotice } from '../src/welcome-api.ts'
 
 const html = readFileSync(join(import.meta.dirname, '../renderer/welcome.html'), 'utf8')
 afterEach(cleanup)
@@ -23,114 +23,39 @@ function mount(language = 'zh-CN', takeNotice = vi.fn<() => Promise<WelcomeNotic
     cancelSignIn: vi.fn(async (): Promise<AccountView> => ({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out', attempt: null })),
     copySignInLink: vi.fn(async () => undefined),
     ...resolveDesktopLocale(language),
-    listProviders: vi.fn<() => Promise<readonly WelcomeProvider[]>>().mockResolvedValue([{ id: 'deepseek', name: 'DeepSeek' }]),
-    saveApiKey: vi.fn<(provider: string, value: string) => Promise<WelcomeSaveResult>>().mockResolvedValue({ ok: true }),
-    skip: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
   }
   const mounted = render(<Welcome api={api} />)
-  const input = document.querySelector('input')!
   const button = (id: string) => document.querySelector<HTMLButtonElement>(id)!
-  const enterKey = (value: string) => {
-    fireEvent.change(input, { target: { value } })
+  const publish = (state: AccountView) => {
+    act(() => { view.api.onAccountState.mock.calls[0]![0](state) })
   }
-  const submit = () => fireEvent.submit(document.querySelector('form')!)
   const copy = () => {
     const heading = document.querySelector('main')!.getAttribute('aria-labelledby')!
     return [
       document.title, document.querySelector('img')!.alt, document.getElementById(heading)!.textContent,
       ...heading === 'welcome-heading' ? [document.querySelector('#welcome-description')!.textContent] : [],
-      ...heading === 'key-title' ? [document.querySelector('#key-description')!.textContent, `${input.placeholder} [password]`] : [],
       ...[...document.querySelectorAll('button')].filter(item => item.closest('[hidden]') === null)
         .map(item => `${item.textContent || item.getAttribute('aria-label')}${item.disabled ? ' [disabled]' : ''}`),
       '',
     ].join('\n')
   }
-  return { document, api, input, button, enterKey, submit, copy, unmount: mounted.unmount, stopAccount }
+  const copyAuth = () => copy() + document.querySelector('#auth-description')!.textContent + '\n'
+  const view = { document, api, button, publish, copy, copyAuth, unmount: mounted.unmount, stopAccount }
+  return view
+}
+
+function attempt(id: string, phase: AccountView['attempt'] extends null ? never : NonNullable<AccountView['attempt']>['phase'], extra: Partial<NonNullable<AccountView['attempt']>> = {}): AccountView {
+  return { status: 'signed-out', links: { usageUrl: '', topUpUrl: '' }, attempt: { id: id as SignInAttemptId, phase, ...extra } }
 }
 
 describe('desktop welcome presentation', () => {
-  it.each(['zh-CN', 'en'])('renders the %s entry and API-key step', async (language) => {
+  it.each(['zh-CN', 'en'])('renders the %s entry with sign in as the only action', async (language) => {
     const view = mount(language)
     expect(view.document.documentElement.lang).toBe(language)
     expect(view.document.querySelector('img')!.getAttribute('src')).toBe('assets/welcome-brand.svg')
+    expect(view.document.querySelector('input')).toBeNull()
+    expect(view.document.querySelector('form')).toBeNull()
     await expect(view.copy()).toMatchFileSnapshot(`./expected/welcome/${language}.expected.txt`)
-    fireEvent.click(view.button('#api-key'))
-    expect(view.document.activeElement).toBe(view.input)
-    expect(view.input.type).toBe('password')
-    await expect(view.copy()).toMatchFileSnapshot(`./expected/welcome/${language}-api-key.expected.txt`)
-  })
-
-  it('sends one trimmed key, prevents competing actions, and clears it after saving', async () => {
-    const view = mount()
-    await act(async () => {})
-    const saved = Promise.withResolvers<WelcomeSaveResult>()
-    view.api.saveApiKey.mockReturnValue(saved.promise)
-    fireEvent.click(view.button('#api-key'))
-    view.enterKey('  sk-desktop-example  ')
-    view.submit()
-    view.submit()
-    fireEvent.click(view.button('#skip-key'))
-    expect(view.api.saveApiKey).toHaveBeenCalledExactlyOnceWith('deepseek', 'sk-desktop-example')
-    expect(view.api.skip).not.toHaveBeenCalled()
-    expect(view.button('#save-key').disabled).toBe(true)
-    expect(view.button('#save-key').textContent).toBe(view.api.messages.welcomeKeySave)
-    expect(view.document.querySelector<HTMLElement>('#key-form')!.hidden).toBe(false)
-    saved.resolve({ ok: true })
-    await vi.waitFor(() => { expect(view.input.value).toBe('') })
-    expect(view.document.body.textContent).not.toContain('sk-desktop-example')
-  })
-
-  it.each(['', 'bad key', '密钥', 'DEEPSEEK_API_KEY=sk-example', '"sk-example"', '`sk-example`'])(
-    'rejects invalid input before sending it: %s', (value) => {
-      const view = mount()
-      fireEvent.click(view.button('#api-key'))
-      view.enterKey(value)
-      view.submit()
-      expect(view.api.saveApiKey).not.toHaveBeenCalled()
-      expect(view.document.querySelector<HTMLElement>('#key-error')!.hidden).toBe(false)
-      expect(view.input.getAttribute('aria-invalid')).toBe('true')
-    },
-  )
-
-  it('retains an unsaved draft and allows retry after a refused save', async () => {
-    const view = mount()
-    await act(async () => {})
-    view.api.saveApiKey.mockResolvedValue({ ok: false })
-    fireEvent.click(view.button('#api-key'))
-    view.enterKey('sk-retry')
-    view.submit()
-    await vi.waitFor(() => { expect(view.button('#save-key').disabled).toBe(false) })
-    expect(view.input.value).toBe('sk-retry')
-    expect(view.document.querySelector('#key-error')!.textContent).toBe(view.api.messages.welcomeKeyFailed)
-    view.api.saveApiKey.mockResolvedValue({ ok: true })
-    view.submit()
-    await vi.waitFor(() => { expect(view.input.value).toBe('') })
-  })
-
-  it('skips without saving and starts a fresh renderer at the entry again', async () => {
-    const view = mount()
-    await act(async () => {})
-    const skipped = Promise.withResolvers<undefined>()
-    view.api.skip.mockReturnValue(skipped.promise)
-    fireEvent.click(view.button('#api-key'))
-    view.enterKey('sk-not-saved')
-    fireEvent.click(view.button('#skip-key'))
-    try {
-      expect(view.button('#save-key').textContent).toBe(view.api.messages.welcomeKeySave)
-      expect(view.button('#skip-key').textContent).toBe(view.api.messages.welcomeKeyLater)
-      expect(view.button('#save-key').disabled).toBe(true)
-      expect(view.button('#skip-key').disabled).toBe(true)
-      fireEvent.click(view.button('#skip-key'))
-      view.submit()
-      expect(view.api.skip).toHaveBeenCalledOnce()
-      expect(view.api.saveApiKey).not.toHaveBeenCalled()
-    } finally {
-      skipped.resolve(undefined)
-    }
-    await vi.waitFor(() => { expect(view.input.value).toBe('') })
-    expect(view.api.skip).toHaveBeenCalledOnce()
-    expect(view.api.saveApiKey).not.toHaveBeenCalled()
-    expect(mount().document.querySelector<HTMLElement>('#key-form')!.hidden).toBe(true)
   })
 
   it('keeps visible copy in the shell dictionaries and denies network access', () => {
@@ -140,30 +65,168 @@ describe('desktop welcome presentation', () => {
   })
 })
 
-it.each(['zh-CN', 'en'])('shows and clears the expiry notice from the pending IPC: %s', async (language) => {
+it.each(['zh-CN', 'en'])('signs in from the %s entry and reports the click once', async (language) => {
+  const view = mount(language)
+  expect(view.api.analytics).not.toHaveBeenCalled()
+  const waiting = attempt('waiting', 'waiting-browser', { authorizeUrl: 'https://example.test/login' })
+  view.api.startSignIn.mockResolvedValueOnce(waiting)
+  fireEvent.click(view.button('#sign-in'))
+  expect(view.api.startSignIn).toHaveBeenCalledOnce()
+  await vi.waitFor(() => { expect(view.button('#auth-copy').hidden).toBe(false) })
+  expect(view.api.analytics.mock.calls).toEqual([['auth_page_click', { button_name: 'sign_in' }]])
+  expect(view.document.querySelector('main')!.getAttribute('aria-labelledby')).toBe('auth-status')
+})
+
+it.each(['zh-CN', 'en'])('renders the %s browser fallback and copies only the active login link', async (language) => {
+  const view = mount(language)
+  view.publish(attempt('waiting', 'waiting-browser', { authorizeUrl: 'https://example.test/login' }))
+  await expect(view.copyAuth()).toMatchFileSnapshot(`./expected/welcome/${language}-waiting.expected.txt`)
+  fireEvent.click(view.button('#auth-copy'))
+  await vi.waitFor(() => { expect(view.button('#auth-copy').textContent).toBe(view.api.messages.welcomeAuthCopied) })
+  expect(view.api.copySignInLink).toHaveBeenCalledWith('waiting')
+  view.publish(attempt('waiting', 'exchanging'))
+  expect(view.button('#auth-copy').hidden).toBe(true)
+  expect(view.button('#auth-loading').hidden).toBe(false)
+  fireEvent.click(view.button('#auth-cancel'))
+  await vi.waitFor(() => { expect(view.api.cancelSignIn).toHaveBeenCalledWith('waiting') })
+  view.publish(attempt('waiting', 'cancelled'))
+  expect(view.button('#sign-in').closest('[hidden]')).toBeNull()
+})
+
+it.each(['zh-CN', 'en'])('renders the %s timeout with manual retry', async (language) => {
+  const view = mount(language)
+  view.publish(attempt('expired', 'expired'))
+  expect(view.button('#auth-retry').hidden).toBe(false)
+  expect(view.button('#auth-cancel').hidden).toBe(true)
+  expect(view.api.startSignIn).not.toHaveBeenCalled()
+  await expect(view.copyAuth()).toMatchFileSnapshot(`./expected/welcome/${language}-timeout.expected.txt`)
+  fireEvent.click(view.button('#auth-retry'))
+  expect(view.api.analytics.mock.calls).toEqual([['auth_page_click', { button_name: 'sign_in' }]])
+  expect(view.api.startSignIn).toHaveBeenCalledOnce()
+})
+
+it('keeps a newer account notification when the start response arrives late', async () => {
+  const view = mount()
+  const started = Promise.withResolvers<AccountView>()
+  view.api.startSignIn.mockReturnValueOnce(started.promise)
+  fireEvent.click(view.button('#sign-in'))
+  expect(view.button('#auth-cancel').disabled).toBe(true)
+  const expired = attempt('attempt', 'expired')
+  view.publish(expired)
+  await act(async () => { started.resolve(attempt('attempt', 'waiting-browser')); await started.promise })
+  expect(view.document.querySelector('#auth-status')!.textContent).toBe(view.api.messages.welcomeAuthExpired)
+  expect(view.button('#auth-retry').hidden).toBe(false)
+})
+
+it('does not restore a copied-link status after leaving the waiting phase', async () => {
+  const view = mount()
+  const copied = Promise.withResolvers<undefined>()
+  view.api.copySignInLink.mockReturnValueOnce(copied.promise)
+  const waiting = attempt('attempt', 'waiting-browser')
+  view.publish(waiting)
+  fireEvent.click(view.button('#auth-copy'))
+  expect(view.button('#auth-copy').disabled).toBe(true)
+  view.publish(attempt('attempt', 'exchanging'))
+  await act(async () => { copied.resolve(undefined); await copied.promise })
+  expect(view.button('#auth-copy').hidden).toBe(true)
+  expect(view.button('#auth-copy').textContent).toBe(view.api.messages.welcomeAuthCopyLink)
+})
+
+it('releases the account subscription on unmount', () => {
+  const view = mount()
+  view.publish(attempt('expired', 'expired'))
+  expect(view.button('#auth-retry').hidden).toBe(false)
+  view.unmount()
+  expect(view.stopAccount).toHaveBeenCalledOnce()
+})
+
+it.each(['copied', 'failed'] as const)('restores the copy action after %s feedback and cleans up on unmount', async (result) => {
   vi.useFakeTimers()
   try {
-    const takeNotice = vi.fn<() => Promise<WelcomeNotice | undefined>>().mockResolvedValue('session-expired')
+    const view = mount('en')
+    if (result === 'failed') view.api.copySignInLink.mockRejectedValue(new Error('clipboard unavailable'))
+    view.publish(attempt('waiting', 'waiting-browser'))
+    const feedback = result === 'copied' ? view.api.messages.welcomeAuthCopied : view.api.messages.welcomeAuthCopyFailed
+    const copy = async () => { await act(async () => { fireEvent.click(view.button('#auth-copy')) }) }
+    await copy()
+    expect(view.button('#auth-copy').textContent).toBe(feedback)
+    expect(view.button('#auth-copy').disabled).toBe(result === 'copied')
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500) })
+    await copy()
+    expect(view.api.copySignInLink).toHaveBeenCalledTimes(result === 'copied' ? 1 : 2)
+    await act(async () => { await vi.advanceTimersByTimeAsync(result === 'copied' ? 499 : 1999) })
+    expect(view.button('#auth-copy').textContent).toBe(feedback)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    expect(view.button('#auth-copy').textContent).toBe(view.api.messages.welcomeAuthCopyLink)
+    expect(view.button('#auth-copy').disabled).toBe(false)
+    await copy()
+    expect(view.api.copySignInLink).toHaveBeenCalledTimes(result === 'copied' ? 2 : 3)
+    view.unmount()
+    expect(vi.getTimerCount()).toBe(0)
+  } finally {
+    cleanup()
+    vi.useRealTimers()
+  }
+})
+
+it.each(['zh-CN', 'en'])('keeps the expiry notice visible after returning to Welcome: %s', async (language) => {
+  vi.useFakeTimers()
+  try {
+    const takeNotice = vi.fn<() => Promise<WelcomeNotice | undefined>>().mockResolvedValue(undefined).mockResolvedValueOnce('session-expired')
     const view = mount(language, takeNotice)
     await act(async () => {})
+    view.publish({ status: 'signed-out', attempt: null, links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' } })
     const notice = screen.getByRole('alert')
     expect(notice.textContent).toBe(view.api.messages.welcomeSessionExpired)
     await expect(`${notice.textContent}\n`).toMatchFileSnapshot(`./expected/welcome/${language}-expired.expected.txt`)
+    expect(view.button('#sign-in').closest('[hidden]')).toBeNull()
     await act(async () => { await vi.advanceTimersByTimeAsync(4000) })
     expect(screen.queryByRole('alert')).toBeNull()
+    await act(async () => { view.publish({ status: 'signed-out', attempt: null, links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' } }) })
+    expect(screen.queryByRole('alert')).toBeNull()
     view.unmount()
-    mount(language, vi.fn<() => Promise<WelcomeNotice | undefined>>().mockResolvedValue(undefined))
+    mount(language, takeNotice)
     await act(async () => {})
     expect(screen.queryByRole('alert')).toBeNull()
   } finally { cleanup(); vi.useRealTimers() }
+})
+
+it('does not infer a notification from a retained expired account snapshot', async () => {
+  const view = mount()
+  await act(async () => {
+    view.publish({ status: 'signed-out', attempt: null, links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' } })
+  })
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(view.button('#sign-in').closest('[hidden]')).toBeNull()
+})
+
+it.each(['zh-CN', 'en'])('returns from completed sign-in to the entry after sign-out: %s', async (language) => {
+  const view = mount(language)
+  const links = { usageUrl: 'https://example.test/usage', topUpUrl: 'https://example.test/top_up' }
+  view.publish({ status: 'credential-stored', links, attempt: { id: 'completed' as SignInAttemptId, phase: 'succeeded' } })
+  expect(view.button('#auth-page').hidden).toBe(false)
+  expect(view.button('#auth-cancel').disabled).toBe(true)
+  view.publish({ status: 'signed-out', links, attempt: null })
+  expect(view.button('#sign-in').closest('[hidden]')).toBeNull()
+  await expect(view.copy()).toMatchFileSnapshot(`./expected/welcome/${language}.expected.txt`)
+})
+
+it('reports each return to the welcome entry once, including a cancelled start', async () => {
+  const view = mount()
+  expect(view.api.analytics).not.toHaveBeenCalled()
+  const pending = Promise.withResolvers<AccountView>()
+  view.api.startSignIn.mockReturnValueOnce(pending.promise)
+  fireEvent.click(view.button('#sign-in'))
+  await act(async () => { pending.resolve({ links: { usageUrl: 'http://localhost/usage', topUpUrl: 'http://localhost/top_up' }, status: 'signed-out', attempt: null }); await pending.promise })
+  expect(view.api.analytics.mock.calls.map(([action]) => action)).toEqual(['auth_page_click', 'auth_page_view'])
 })
 
 it('keeps the entry usable when notification IPC fails', async () => {
   const view = mount('en', vi.fn<() => Promise<WelcomeNotice | undefined>>().mockRejectedValue(new Error('closed')))
   await act(async () => {})
   expect(screen.queryByRole('alert')).toBeNull()
-  fireEvent.click(view.button('#api-key'))
-  expect(view.input.closest('[hidden]')).toBeNull()
+  fireEvent.click(view.button('#sign-in'))
+  expect(view.api.startSignIn).toHaveBeenCalledOnce()
 })
 
 it('ignores a notification received after its renderer unmounts', async () => {
@@ -173,14 +236,4 @@ it('ignores a notification received after its renderer unmounts', async () => {
   mount('en')
   await act(async () => { pending.resolve('session-expired') })
   expect(screen.queryByRole('alert')).toBeNull()
-})
-
-it('reports the entry click and the save attempt once each', () => {
-  const view = mount()
-  expect(view.api.analytics).not.toHaveBeenCalled()
-  fireEvent.click(view.button('#api-key'))
-  expect(view.api.analytics.mock.calls.map(([action]) => action)).toEqual(['auth_page_click'])
-  view.enterKey('sk-analytics')
-  view.submit()
-  expect(view.api.analytics.mock.calls.map(([action]) => action)).toEqual(['auth_page_click', 'api_key_save_click'])
 })

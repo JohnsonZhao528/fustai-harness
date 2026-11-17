@@ -1,9 +1,9 @@
 import type { AccountView, SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
-/** Localized welcome copy and write-only credential actions. */
+/** Localized welcome copy and account sign-in actions. */
 
 import { contextBridge, ipcRenderer } from 'electron'
 import { resolveDesktopLocale } from './locale.ts'
-import { WELCOME_IPC, type WelcomeApi, type WelcomeNotice, type WelcomeProvider, type WelcomeSaveResult } from './welcome-api.ts'
+import { WELCOME_IPC, type WelcomeApi, type WelcomeNotice } from './welcome-api.ts'
 
 const prefix = '--dsh-welcome-locale='
 const locale = process.argv.find(argument => argument.startsWith(prefix))?.slice(prefix.length)
@@ -23,9 +23,5 @@ const api: WelcomeApi = {
     ipcRenderer.on(WELCOME_IPC.state, receive)
     return () => { ipcRenderer.removeListener(WELCOME_IPC.state, receive) }
   },
-  saveApiKey: (provider: string, value: string) =>
-    ipcRenderer.invoke(WELCOME_IPC.saveApiKey, provider, value) as Promise<WelcomeSaveResult>,
-  listProviders: () => ipcRenderer.invoke(WELCOME_IPC.listProviders) as Promise<readonly WelcomeProvider[]>,
-  skip: () => ipcRenderer.invoke(WELCOME_IPC.skip) as Promise<void>,
 }
 contextBridge.exposeInMainWorld('dshWelcome', api)
