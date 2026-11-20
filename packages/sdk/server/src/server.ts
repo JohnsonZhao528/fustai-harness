@@ -481,7 +481,7 @@ export class HarnessSdkJsonRpcServer {
         Array.isArray(candidate) && candidate.every(label => typeof label === 'string')
       const answers = value.answers.map((answer: unknown): AskUserQuestionAnswer['answers'][number] => {
         if (answer === null || typeof answer !== 'object') throw bad()
-        const { id, selected, custom } = answer as { id?: unknown, selected?: unknown, custom?: unknown }
+        const { id, selected, custom } = answer as { id?: unknown; selected?: unknown; custom?: unknown }
         if (typeof id !== 'string' || !isLabels(selected) || (custom !== undefined && typeof custom !== 'string')) throw bad()
         return {
           id,

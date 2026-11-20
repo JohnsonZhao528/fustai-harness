@@ -1463,7 +1463,7 @@ class ScriptedTransport implements JsonRpcTransportPeer {
   readonly requests: { method: string; params: Record<string, unknown>; signal: AbortSignal | undefined }[] = []
   readonly notifications: { method: string; params?: Record<string, unknown> }[] = []
   responder: (params: Record<string, unknown>, signal: AbortSignal | undefined) => Promise<unknown> =
-    async params => { throw new Error(`unexpected host call with ${JSON.stringify(params)}`) }
+    async (params) => { throw new Error(`unexpected host call with ${JSON.stringify(params)}`) }
   notificationFailure: Error | undefined
 
   async request(method: string, params: object, signal?: AbortSignal): Promise<unknown> {

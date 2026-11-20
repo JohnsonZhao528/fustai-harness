@@ -365,7 +365,7 @@ describe('record handoff across documents', { timeout: 60_000 }, () => {
   it('keeps the untouched entries and comments already in the target document', async () => {
     const dir = await tempDir()
     const target = join(dir, '.credentials.yaml')
-    await writeCredentials(target, `version: 1\nrefs:\n  # chosen by hand\n  DEEPSEEK_API_KEY: sk-owner\nrecords:\n  llm-kimi/openai-codex:\n    kind: api-key\n`)
+    await writeCredentials(target, 'version: 1\nrefs:\n  # chosen by hand\n  DEEPSEEK_API_KEY: sk-owner\nrecords:\n  llm-kimi/openai-codex:\n    kind: api-key\n')
     await storeCredentialRecord(target, CODEX, { kind: 'grant', payload: { token: 'tok' } })
 
     const text = await readFile(target, 'utf8')

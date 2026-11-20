@@ -148,7 +148,7 @@ it('keeps Cancel inert while the attempt commits its credential', () => {
 it('disables Cancel while a cancellation is in flight', async () => {
   const gate = mount(awaitingBrowser('waiting-browser'))
   let settle: () => void = () => {}
-  gate.cancel.mockImplementation(() => new Promise<void>(resolve => { settle = resolve }))
+  gate.cancel.mockImplementation(() => new Promise<void>((resolve) => { settle = resolve }))
   act(() => { screen.getByRole('button', { name: en.cancel }).click() })
   expect((screen.getByRole('button', { name: en.cancel }) as HTMLButtonElement).disabled).toBe(true)
   await act(async () => { settle() })

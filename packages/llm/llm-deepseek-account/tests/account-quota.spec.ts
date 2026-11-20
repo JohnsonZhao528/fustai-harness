@@ -67,7 +67,7 @@ it('reports an in-band account balance stream error as ACCOUNT_QUOTA', async () 
 })
 
 /** Mount the route with a spy on the credential removal it may report. */
-async function routeWithRejectSpy(): Promise<{ ctx: Context, rejectToken: ReturnType<typeof vi.fn> }> {
+async function routeWithRejectSpy(): Promise<{ ctx: Context; rejectToken: ReturnType<typeof vi.fn> }> {
   const ctx = new Context()
   contexts.push(ctx)
   await ctx.plugin(LlmRuntime)
