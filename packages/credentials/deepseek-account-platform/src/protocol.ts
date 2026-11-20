@@ -13,6 +13,11 @@ export class AccountUnauthorizedError extends PlatformAuthError {
   constructor() { super('expired') }
 }
 
+/** The addressed account resource does not exist (HTTP 404); the code stays `network` for generic handlers. */
+export class AccountNotFoundError extends PlatformAuthError {
+  constructor() { super('network') }
+}
+
 /**
  * Accept HTTPS platform endpoints, or explicitly configured loopback development HTTP.
  * @param value - configured origin.
@@ -81,6 +86,9 @@ export const initialization = z.object({
 /** Successful code exchange response. */
 export const exchange = z.object({ token: z.string().regex(/^[\x21-\x7e]+$/), authorized_url: z.url(), user: z.unknown().optional() })
 
+/** Inference credential the Platform provisions for a signed-in account. */
+export const modelKey = z.object({ api_key: z.string().regex(/^[\x21-\x7e]+$/), base_url: z.url() })
+
 /**
  * Read one bounded platform response; non-cancellation failures emit non-secret diagnostics to stderr.
  * @param origin - validated platform origin.
@@ -113,6 +121,20 @@ export function requestAccount(origin: string, path: '/auth-api/v0/users/current
 }
 
 /**
+ * Fetch the inference credential the Platform provisions for the signed-in account.
+ * @param origin - configured origin matching the grant issuer.
+ * @param token - stored account grant.
+ * @param signal - request deadline.
+ * @param headers - deployment headers for this origin.
+ * @returns successful business payload holding the key and the origin it is valid for.
+ */
+export function requestModelKey(origin: string, token: string,
+  signal: AbortSignal, headers: Record<string, string>): Promise<unknown> {
+  return platformRequest(`${origin}/auth-api/v0/dsh/model_key`,
+    { method: 'POST', headers: accountHeaders(headers, token) }, signal)
+}
+
+/**
  * Read the granted bonuses Platform has not yet recorded as displayed.
  * @param origin - configured origin matching the grant issuer.
  * @param token - stored account grant.
@@ -140,6 +162,39 @@ export function requestBonusNotified(origin: string, token: string, orderId: Acc
   return platformRequest(`${origin}/api/v0/users/ack_bonus_notified`, {
     method: 'POST', headers: { ...accountHeaders(headers, token), 'content-type': 'application/json' },
     body: JSON.stringify({ order_id: orderId }),
+  }, signal)
+}
+
+/**
+ * Read the model credential the account shares across devices.
+ * @param origin - configured origin matching the grant issuer.
+ * @param token - stored account grant.
+ * @param signal - request deadline.
+ * @param headers - deployment headers for this origin.
+ * @returns successful business payload holding the key and its base URL.
+ * @throws AccountNotFoundError when the account has stored no credential yet.
+ */
+export function requestSharedCredentials(origin: string, token: string,
+  signal: AbortSignal, headers: Record<string, string>): Promise<unknown> {
+  return platformRequest(`${origin}/api/v0/credentials`,
+    { method: 'GET', headers: accountHeaders(headers, token) }, signal)
+}
+
+/**
+ * Upload the locally configured model key so every device of the account loads the same credential.
+ * @param origin - configured origin matching the grant issuer.
+ * @param token - stored account grant.
+ * @param apiKey - local model key to share.
+ * @param baseUrl - endpoint the key is valid for; the account returns it to every device.
+ * @param signal - request deadline.
+ * @param headers - deployment headers for this origin.
+ * @returns successful business payload holding the credential the account now resolves to.
+ */
+export function uploadSharedCredentials(origin: string, token: string, apiKey: string, baseUrl: string,
+  signal: AbortSignal, headers: Record<string, string>): Promise<unknown> {
+  return platformRequest(`${origin}/api/v0/credentials`, {
+    method: 'PUT', headers: { ...accountHeaders(headers, token), 'content-type': 'application/json' },
+    body: JSON.stringify({ api_key: apiKey, base_url: baseUrl }),
   }, signal)
 }
 
@@ -182,6 +237,11 @@ async function platformRequest(url: string, init: RequestInit, signal: AbortSign
     if (!callerCancelled(signal)) console.error('[deepseek-account] request failed', { path, status: response.status, errorCode: 'expired' })
     await response.body?.cancel()
     throw new AccountUnauthorizedError()
+  }
+  if (response.status === 404) {
+    if (!callerCancelled(signal)) console.error('[deepseek-account] request failed', { path, status: response.status, errorCode: 'not-found' })
+    await response.body?.cancel()
+    throw new AccountNotFoundError()
   }
   if (!response.ok || response.body === null) {
     if (!callerCancelled(signal)) console.error('[deepseek-account] request failed', { path, status: response.status, errorCode: 'network' })

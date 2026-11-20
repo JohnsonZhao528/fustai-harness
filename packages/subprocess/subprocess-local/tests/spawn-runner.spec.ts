@@ -49,6 +49,8 @@ import {
   runSpawnRunner,
 } from '../src/spawn-runner.ts'
 import type { SpawnRunnerInternals } from '../src/spawn-runner.ts'
+import { childEnv } from '../src/spawn.ts'
+import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 
 const scratch: string[] = []
 
@@ -989,5 +991,13 @@ describe('Windows Job runner protocol owner', () => {
     const noSelection = new FakeRunnerHost()
     await reportSpawnRunnerFailure(undefined, new Error('no selector'), hostArgument(noSelection))
     expect(noSelection.exitCode).toBe(127)
+  })
+})
+
+describe('child data root', () => {
+  it('inherits the parent data root unless the spec states another', () => {
+    expect(childEnv().DSH_HOME).toBe(resolveDshHome())
+    expect(childEnv({ DSH_HOME: '/explicit/home' }).DSH_HOME).toBe('/explicit/home')
+    expect(targetEnvironment({ argv: ['tool'], cwd: '/', env: { DSH_HOME: undefined } }).DSH_HOME).toBeUndefined()
   })
 })

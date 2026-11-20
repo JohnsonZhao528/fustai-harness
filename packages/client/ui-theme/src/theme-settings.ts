@@ -5,11 +5,21 @@ import z from '@deepseek-ai/schemastery'
 /** Built-in preferences accepted at the registry and settings boundaries. */
 export const THEME_PREFERENCES = ['light', 'dark', 'system'] as const
 
+/**
+ * Built-in skins accepted at the settings boundary. A skin re-hues the
+ * palette (surfaces, text, accent, corner radii) independently of the
+ * light/dark preference, which keeps deciding the palette side in use.
+ */
+export const THEME_SKINS = ['a', 'b', 'c'] as const
+
 /** Settings namespace owned by the theme plugin. */
 export const THEME_SETTINGS_NAMESPACE = 'ui-theme'
 
 /** Field carrying the selected built-in theme preference. */
 export const THEME_PREFERENCE_FIELD = 'preference'
+
+/** Field carrying the selected skin. */
+export const SKIN_FIELD = 'skin'
 
 /** Field carrying the conversation content font size. */
 export const FONT_SIZE_FIELD = 'fontSize'
@@ -19,6 +29,12 @@ export type ThemePreference = typeof THEME_PREFERENCES[number]
 
 /** Default preference when the user-settings document has no override. */
 export const DEFAULT_PREFERENCE: ThemePreference = 'system'
+
+/** Skin persisted by the product Skin row. */
+export type ThemeSkin = typeof THEME_SKINS[number]
+
+/** Default skin when the user-settings document has no override. */
+export const DEFAULT_SKIN: ThemeSkin = 'a'
 
 /** Smallest accepted content font size (px). */
 export const FONT_SIZE_MIN = 10
@@ -92,6 +108,8 @@ export type FontFamilies = Readonly<Record<FontRole, string>>
 export interface ThemeSettings {
   /** Selected built-in preference. */
   preference: ThemePreference
+  /** Selected skin; re-hues the palette without changing the light/dark side. */
+  skin: ThemeSkin
   /** Conversation content font size in px (integer within {@link FONT_SIZE_MIN}..{@link FONT_SIZE_MAX}). */
   fontSize: number
   /** Code-block font size in px (integer within the {@link FONT_SIZE_SPECS} `code` range). */
@@ -138,6 +156,7 @@ export function isFontSize(role: FontRole, px: number): boolean {
 /** Durable theme schema; also the wire envelope the browser scope validates against. */
 export const ThemeSettingsSchema: z<ThemeSettings> = z.object({
   [THEME_PREFERENCE_FIELD]: z.union([...THEME_PREFERENCES]).default(DEFAULT_PREFERENCE),
+  [SKIN_FIELD]: z.union([...THEME_SKINS]).default(DEFAULT_SKIN),
   [FONT_SIZE_FIELD]: fontSizeSchema(FONT_SIZE_SPECS.text),
   [FONT_SIZE_SPECS.code.field]: fontSizeSchema(FONT_SIZE_SPECS.code),
   [FONT_SIZE_SPECS.terminal.field]: fontSizeSchema(FONT_SIZE_SPECS.terminal),
@@ -175,4 +194,13 @@ export function normalizeFontFamily(value: string): string {
  */
 export function isThemePreference(value: unknown): value is ThemePreference {
   return THEME_PREFERENCES.some(preference => preference === value)
+}
+
+/**
+ * Narrow one wire or registry value to a persistable skin.
+ * @param value - value crossing the settings or registry boundary.
+ * @returns whether the value is a built-in skin.
+ */
+export function isThemeSkin(value: unknown): value is ThemeSkin {
+  return THEME_SKINS.some(skin => skin === value)
 }

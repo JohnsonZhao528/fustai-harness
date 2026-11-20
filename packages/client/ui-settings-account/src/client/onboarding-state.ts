@@ -1,7 +1,6 @@
 /** Resumable desktop onboarding and preference application over Host settings. */
 import type { TranscriptViewMode } from '@deepseek-ai/dsh-client-ui-chat/client'
 import { createSnapshotStore, shallowEqual } from '@deepseek-ai/dsh-client-store'
-import { hasOnboardingCredit } from './onboarding-balance.ts'
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SettingsDescribeFace, ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { OnboardingProgress, OnboardingSettings } from '../onboarding-settings.ts'
@@ -16,7 +15,7 @@ function freshProgress(): OnboardingProgress {
 export class DesktopOnboardingController {
   /** Private observable projected into the shell overlay's framework hook. */
   readonly state = createSnapshotStore<DesktopOnboardingState>({
-    status: 'loading', visible: false, progress: freshProgress(), error: null, creditFunded: false,
+    status: 'loading', visible: false, progress: freshProgress(), error: null,
   })
   private readonly disposers: (() => void)[]
   private saving = false
@@ -29,7 +28,6 @@ export class DesktopOnboardingController {
   private checkingKeys = false
   private error: 'settings' | null = null
   private failedWrite: { next: OnboardingProgress; applyPreferences: boolean } | undefined
-  private creditFunded: boolean | undefined
 
   /**
    * @param progress - installation-scoped durable progress.
@@ -202,10 +200,6 @@ export class DesktopOnboardingController {
     const account = snapshot.view
     const signedIn = account?.status === 'credential-stored'
     const progress = this.draft ?? this.readProgress() ?? freshProgress()
-    if (!signedIn) this.creditFunded = undefined
-    else if (this.creditFunded === undefined && host.status === 'ready' && progress.step === 'credit') {
-      this.creditFunded = hasOnboardingCredit(snapshot.details?.balance)
-    }
     if (signedIn && this.failedWrite?.next.completion === 'api-key') {
       this.failedWrite = undefined
       this.error = null
@@ -217,7 +211,6 @@ export class DesktopOnboardingController {
     const previous = this.state.getSnapshot()
     const next: DesktopOnboardingState = {
       progress: shallowEqual(previous.progress, progress) ? previous.progress : progress,
-      creditFunded: this.creditFunded ?? false,
       visible: !done && signedIn && !unavailable,
       status: this.completing || (this.saving && this.draft === undefined) ? 'saving' : unavailable || readFailed || accountFailed || this.error !== null ? 'error'
         : host.status === 'loading' || account === undefined ? 'loading' : 'ready',

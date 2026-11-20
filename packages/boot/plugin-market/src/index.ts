@@ -26,6 +26,20 @@ declare module '@deepseek-ai/cordis' {
     /** Configured plugin market index sources and their validated listings. */
     pluginMarket: PluginMarket
   }
+
+  interface Events {
+    /**
+     * The response for one index document read. Calling `next()` performs the
+     * default `fetch`; a listener that answers for a URL itself must return a
+     * response for exactly that document and leave `next()` uncalled. A
+     * deployment that reaches the configured URL through a mirror answers here
+     * instead of configuring the mirror as a second index source.
+     * @param url - the configured index URL being read.
+     * @param init - the request the default fetch sends, including the abort signal and deadline.
+     * @mode waterfall
+     */
+    'plugin-market/fetch-response'(url: string, init: RequestInit, next: () => Promise<Response>): Promise<Response>
+  }
 }
 
 /** Index sources and fetch limits. */
@@ -265,9 +279,10 @@ export default class PluginMarket extends TypertRemoteService {
     const signal = AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(this.config.fetchTimeoutMs)])
     const failed = (reason: string, cause?: unknown): RemoteError =>
       new RemoteError('plugin-market/fetch-failed', `Could not fetch ${url}: ${reason}`, { url, reason }, { cause })
+    const init: RequestInit = { signal, redirect: 'error', headers: { accept: 'application/json' } }
     let response: Response
     try {
-      response = await fetch(url, { signal, redirect: 'error', headers: { accept: 'application/json' } })
+      response = await this.ctx.waterfall('plugin-market/fetch-response', url, init, () => fetch(url, init))
     } catch (error) {
       throw failed(causeChainOf(error), error)
     }

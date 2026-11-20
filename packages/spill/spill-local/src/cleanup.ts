@@ -72,8 +72,11 @@ function rootIdentity(path: string, stats: Stats): string {
 async function hasProtectedAncestors(path: string): Promise<boolean> {
   /* v8 ignore next -- POSIX ancestry checks have no Windows ACL equivalent. */
   if (process.platform === 'win32' || process.geteuid === undefined) return true
-  /* v8 ignore start -- Windows takes the return above; POSIX tests exercise
-     the ancestor ownership and mode policy. */
+  // Android's `/data` is 0771 system:system, so no app-controlled path passes the ancestor walk
+  // and the sweep could never reclaim an old root. Only the app uid can reach its data directory,
+  // and ancestors above it are system-owned, so the root's own ownership and mode check suffices.
+  /* v8 ignore next -- no CI host reports platform 'android'. */
+  if ((process.platform as string) === 'android') return true
   const currentUid = process.geteuid()
   let child = path
   let childStats = await lstat(child)

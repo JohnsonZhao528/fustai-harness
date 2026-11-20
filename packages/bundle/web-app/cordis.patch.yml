@@ -134,6 +134,13 @@
     - id: schedule
       name: '@deepseek-ai/dsh-schedule'
 
+    # Account card in Settings and the remote state/login methods behind it.
+    - id: ui-settings-account
+      name: '@deepseek-ai/dsh-client-ui-settings-account'
+
+    - id: account-controller
+      name: '@deepseek-ai/dsh-api-account-controller'
+
     # Configuration-surface reads and writes over Typert Remote. Each method
     # reports an actionable error when its settings-domain provider is absent.
     - id: settings-controller

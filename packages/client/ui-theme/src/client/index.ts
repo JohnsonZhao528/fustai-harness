@@ -1,12 +1,15 @@
 /**
  * Browser theme registry over the `--dsw-*` token stylesheets. The service
- * owns the live theme preference (light/dark/system), resolves `system` through
+ * owns the live theme preference (light/dark/system) and skin, resolves
+ * `system` through
  * `prefers-color-scheme`, and publishes immutable snapshots; it never touches
  * the DOM — ui-layout's presenter consumes the resolved snapshot. The Host
  * settings scope loads and stores the preference in the user-settings
- * document. The plugin also registers the Appearance and font settings rows
- * into the settings General section — the theme feature owns its own settings
- * surface. Desktop shortcuts adjust text, code, and terminal font sizes together.
+ * document. The plugin also registers the Appearance, skin, and font settings
+ * rows into the settings General section — the theme feature owns its own
+ * settings surface. Desktop shortcuts adjust text, code, and terminal font
+ * sizes together. The skin re-hues the palette without changing the
+ * light/dark side.
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { BoundActions } from '@deepseek-ai/dsh-client-ui-slots'
@@ -23,21 +26,24 @@ import type { AppearanceRowInjected } from './AppearanceRow.tsx'
 import { AppearanceRow } from './AppearanceRow.tsx'
 import type { FontSettingsInjected } from './FontSettingsGroup.tsx'
 import { FontSettingsGroup } from './FontSettingsGroup.tsx'
-import { createAppearanceRowStore, createFontRowStore } from './settings-store.ts'
+import type { SkinRowInjected } from './SkinRow.tsx'
+import { SkinRow } from './SkinRow.tsx'
+import { createAppearanceRowStore, createFontRowStore, createSkinRowStore } from './settings-store.ts'
 import { installThemeStyles } from './styles.ts'
 import { en, zh, type ThemeKey } from './locales.ts'
 import {
-  DEFAULT_FONT_SIZES, DEFAULT_PREFERENCE, FONT_FAMILY_FIELDS, FONT_ROLES, FONT_SIZE_SPECS,
-  fontFamilyVariable, isFontSize, isThemePreference, normalizeFontFamily, sectionFontSizes,
-  THEME_PREFERENCE_FIELD, THEME_SETTINGS_NAMESPACE,
-  type FontFamilies, type FontRole, type FontSizes, type ThemePreference, type ThemeSettings,
+  DEFAULT_FONT_SIZES, DEFAULT_PREFERENCE, DEFAULT_SKIN, FONT_FAMILY_FIELDS, FONT_ROLES, FONT_SIZE_SPECS,
+  fontFamilyVariable, isFontSize, isThemePreference, isThemeSkin, normalizeFontFamily, sectionFontSizes,
+  SKIN_FIELD, THEME_PREFERENCE_FIELD, THEME_SETTINGS_NAMESPACE,
+  type FontFamilies, type FontRole, type FontSizes, type ThemePreference, type ThemeSettings, type ThemeSkin,
 } from '../theme-settings.ts'
 
 export type { AppearanceRowComponentProps, AppearanceRowInjected } from './AppearanceRow.tsx'
 export type { FontSettingsGroupProps, FontSettingsInjected } from './FontSettingsGroup.tsx'
-export type { AppearanceRowState, FontRowState } from './settings-store.ts'
+export type { SkinRowComponentProps, SkinRowInjected } from './SkinRow.tsx'
+export type { AppearanceRowState, FontRowState, SkinRowState } from './settings-store.ts'
 export type { ThemeKey } from './locales.ts'
-export type { FontFamilies, FontRole, FontSizes, ThemePreference, ThemeSettings } from '../theme-settings.ts'
+export type { FontFamilies, FontRole, FontSizes, ThemePreference, ThemeSettings, ThemeSkin } from '../theme-settings.ts'
 
 /** Namespace owning this feature's settings-row copy. */
 export const SETTINGS_NS = 'settings.theme'
@@ -84,6 +90,8 @@ export interface ThemeDefinition {
 export interface ThemeSnapshot {
   /** The persisted preference (may be `system`). */
   preference: ThemePreference
+  /** The persisted skin (surfaces, accent, and corner radii). */
+  skin: ThemeSkin
   /** Integer px font sizes by role, each within its `FONT_SIZE_SPECS` range (`text` is the conversation content size). */
   fontSizes: FontSizes
   /** Normalized user font lists by role; `''` selects the role's built-in stack. */
@@ -167,6 +175,7 @@ export class ThemeRuntime {
   private readonly host: ConfigForm<ThemeSettings>
   private themes: ThemeDefinition[] = [...BUILTIN_THEMES]
   private preference: ThemePreference
+  private skin: ThemeSkin = bootstrapSkin()
   private fontSizes: FontSizes = bootstrapFontSizes()
   private fontFamilies: FontFamilies = bootstrapFontFamilies()
   private revision = 0
@@ -250,6 +259,19 @@ export class ThemeRuntime {
   }
 
   /**
+   * Switch the palette skin — the only skin write entry. The accepted value
+   * is written through the settings scope and emits `theme/change`; an
+   * unchanged value is ignored.
+   * @param skin - a built-in skin id.
+   */
+  setSkin(skin: ThemeSkin): void {
+    if (this.skin === skin) return
+    this.skin = skin
+    this.write(() => this.host.set(SKIN_FIELD, skin))
+    this.publish()
+  }
+
+  /**
    * Change one role's font size. Accepted
    * values are written through the settings scope and emit `theme/change`.
    * @param role - font role.
@@ -318,8 +340,10 @@ export class ThemeRuntime {
     const fontFamilies = durableFontFamilies(section)
     const fontSizes = sectionFontSizes(section)
     if (this.preference === section.preference
+      && this.skin === section.skin
       && FONT_ROLES.every(role => this.fontSizes[role] === fontSizes[role] && this.fontFamilies[role] === fontFamilies[role])) return
     this.preference = section.preference
+    this.skin = section.skin
     this.fontSizes = fontSizes
     this.fontFamilies = fontFamilies
     this.publish()
@@ -388,6 +412,7 @@ export class ThemeRuntime {
     if (active === undefined) throw new Error(`theme registry lost "${resolvedId}"`)
     return Object.freeze({
       preference: this.preference,
+      skin: this.skin,
       fontSizes: this.fontSizes,
       fontFamilies: this.fontFamilies,
       active: this.composeActive(active),
@@ -447,6 +472,14 @@ function bootstrapFontFamilies(): FontFamilies {
     code: normalizeFontFamily(style.getPropertyValue(fontFamilyVariable('code'))),
     terminal: normalizeFontFamily(style.getPropertyValue(fontFamilyVariable('terminal'))),
   })
+}
+
+/** Skin the Host boot script wrote on `body`, read for the same first-paint reason as {@link bootstrapFontSizes}. */
+function bootstrapSkin(): ThemeSkin {
+  /* v8 ignore next -- needs a documentless run (node e2e booting the client tree), not constructible under jsdom */
+  if (typeof document === 'undefined') return DEFAULT_SKIN
+  const skin = document.body.dataset.dshSkin
+  return isThemeSkin(skin) ? skin : DEFAULT_SKIN
 }
 
 /** Normalized font lists from one accepted settings section (hand-edited documents may hold raw input). */
@@ -537,9 +570,10 @@ export const inject = ['slots', 'locale', 'remote', 'configForms']
 
 /**
  * Client plugin body: provide the theme service and register the
- * feature-owned Appearance and font settings rows into the General section's item
- * slot (a feature owns its settings surface). Desktop font-size shortcuts share
- * all three font-size settings when the keyboard service is available.
+ * feature-owned Appearance, skin, and font settings rows into the General
+ * section's item slot (a feature owns its settings surface). Desktop font-size
+ * shortcuts share all three font-size settings when the keyboard service is
+ * available.
  * @param ctx - client cordis context.
  */
 export function apply(ctx: ClientContext): void {
@@ -551,10 +585,13 @@ export function apply(ctx: ClientContext): void {
 
   const store = createAppearanceRowStore()
   let bound: BoundActions<typeof store> | undefined
+  const skinStore = createSkinRowStore()
+  let skinBound: BoundActions<typeof skinStore> | undefined
   const fontStore = createFontRowStore()
   let fontBound: BoundActions<typeof fontStore> | undefined
   const sync = (snapshot: ThemeSnapshot): void => {
     bound?.sync(snapshot.preference, snapshot.revision)
+    skinBound?.sync(snapshot.skin, snapshot.revision)
     fontBound?.sync(snapshot.fontSizes, snapshot.fontFamilies, snapshot.revision)
   }
   ctx.on('theme/change', sync)
@@ -575,6 +612,21 @@ export function apply(ctx: ClientContext): void {
     locale: SETTINGS_NS,
     inject: injected,
   }, AppearanceRow))
+
+  ctx.slots.inject('settings.general.item', () => ctx.slots.register({
+    name: 'settings.general.item',
+    id: 'skin',
+    order: 12,
+    store: skinStore,
+    locale: SETTINGS_NS,
+    inject: (actions: BoundActions<typeof skinStore>): SkinRowInjected => {
+      skinBound = actions
+      sync(theme.getTheme())
+      return {
+        setSkin: (skin) => { theme.setSkin(skin) },
+      }
+    },
+  }, SkinRow))
 
   ctx.slots.inject('settings.general.item', () => ctx.slots.register({
     name: 'settings.general.item',

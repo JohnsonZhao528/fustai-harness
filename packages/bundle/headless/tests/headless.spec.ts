@@ -165,6 +165,7 @@ async function bench(script: Script, options: BenchOptions = {}): Promise<{
       },
       steer: () => {},
       inject: () => {},
+      wake: () => {},
       whenIdle: async () => {
         options.onWhenIdle?.(agent)
         let activity: Promise<void>

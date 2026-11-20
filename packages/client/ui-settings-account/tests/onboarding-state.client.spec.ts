@@ -88,14 +88,7 @@ async function harness(options: {
 }
 
 describe('desktop onboarding lifecycle', () => {
-  it('counts bonus-only credit before entry', async () => {
-    const h = await harness({ status: 'credential-stored' })
-    h.account.set({ ...h.account.getSnapshot(), details: { balance: { status: 'ready', value: [{ currency: 'CNY', balance: '0' }], bonusWallets: [{ currency: 'CNY', balance: '1' }] } } })
-    await h.controller.update({ step: 'credit' })
-    expect(h.controller.state.getSnapshot().creditFunded).toBe(true)
-  })
-
-  it('keeps the published snapshot stable when account details do not change onboarding', async () => {
+  it('keeps the published snapshot stable when account details change', async () => {
     const h = await harness({ status: 'credential-stored' })
     const before = h.controller.state.getSnapshot()
     h.account.set({ ...h.account.getSnapshot(), details: {} })
@@ -116,62 +109,19 @@ describe('desktop onboarding lifecycle', () => {
     expect(h.controller.state.getSnapshot().progress.step).toBe('process')
   })
 
-  it('keeps funded credit visible and freezes its actions without persisting the decision', async () => {
-    const h = await harness({ status: 'credential-stored' })
-    h.account.set({ ...h.account.getSnapshot(), details: { balance: { status: 'ready', bonusWallets: [], value: [{ currency: 'USD', balance: '0.01' }] } } })
-    await h.controller.update({ step: 'credit' })
-    expect(h.controller.state.getSnapshot()).toMatchObject({ progress: { step: 'credit' }, creditFunded: true })
-    h.account.set({ ...h.account.getSnapshot(), details: { balance: { status: 'failed' } } })
-    await h.controller.update({ step: 'purpose' })
-    await h.controller.update({ step: 'credit' })
-    expect(h.controller.state.getSnapshot()).toMatchObject({ progress: { step: 'credit' }, creditFunded: true })
-    expect(h.data[DESKTOP_ONBOARDING_NAMESPACE]).not.toHaveProperty('creditFunded')
-    h.controller.dispose()
-    const reopened = new DesktopOnboardingController(h.progress, h.chat, h.setDeveloperTools, h.account, h.readKeys, h.mirror)
-    cleanup.push(() => { reopened.dispose() })
-    expect(reopened.state.getSnapshot()).toMatchObject({ progress: { step: 'credit' }, creditFunded: false })
-  })
-
-  it.each(['0', '-1'])('keeps unfunded actions for balance %s when a positive result arrives after entry', async (balance) => {
-    const h = await harness({ status: 'credential-stored' })
-    h.account.set({ ...h.account.getSnapshot(), details: { balance: { status: 'ready', bonusWallets: [], value: [{ currency: 'CNY', balance }] } } })
-    await h.controller.update({ step: 'credit' })
-    h.account.set({ ...h.account.getSnapshot(), details: { balance: { status: 'ready', bonusWallets: [], value: [{ currency: 'CNY', balance: '10' }] } } })
-    expect(h.controller.state.getSnapshot()).toMatchObject({ progress: { step: 'credit' }, creditFunded: false })
-    await h.controller.update({ step: 'purpose' })
-    await h.controller.update({ step: 'credit' })
-    expect(h.controller.state.getSnapshot().creditFunded).toBe(false)
-  })
-
-  it('uses a balance received before saved credit progress loads without rewriting progress', async () => {
-    const settings = Promise.withResolvers<undefined>()
-    const h = await harness({ status: 'credential-stored', progress: { step: 'credit' }, waitSettings: settings.promise })
-    h.account.set({ ...h.account.getSnapshot(), details: { balance: { status: 'ready', bonusWallets: [], value: [{ currency: 'CNY', balance: '1' }] } } })
-    settings.resolve(undefined)
-    await h.loaded
-    expect(h.controller.state.getSnapshot()).toMatchObject({ progress: { step: 'credit' }, creditFunded: true })
-    expect(h.mutate).not.toHaveBeenCalled()
-  })
-
-  it('freezes credit actions at immediate entry while navigation persists', async () => {
+  it('freezes navigation at immediate entry while the step persists', async () => {
     const h = await harness({ status: 'credential-stored' })
     const write = Promise.withResolvers<undefined>()
     h.wait(write.promise)
     const saved = h.controller.update({ step: 'credit' })
-    h.account.set({ ...h.account.getSnapshot(), details: { balance: { status: 'ready', bonusWallets: [], value: [{ currency: 'CNY', balance: '1' }] } } })
     write.resolve(undefined)
     expect(await saved).toBe(true)
-    expect(h.controller.state.getSnapshot()).toMatchObject({ progress: { step: 'credit' }, creditFunded: false })
+    expect(h.controller.state.getSnapshot()).toMatchObject({ status: 'ready', progress: { step: 'credit' } })
   })
 
-  it('does not change credit actions when the first balance result arrives after entry', async () => {
-    const h = await harness({ status: 'credential-stored' })
-    await h.controller.update({ step: 'credit' })
-    h.account.set({ ...h.account.getSnapshot(), details: { balance: { status: 'ready', bonusWallets: [], value: [{ currency: 'CNY', balance: '1' }] } } })
-    expect(h.controller.state.getSnapshot().creditFunded).toBe(false)
-    h.account.set(accountState('signed-out'))
-    h.account.set({ ...accountState('credential-stored'), details: { balance: { status: 'ready', bonusWallets: [], value: [{ currency: 'CNY', balance: '1' }] } } })
-    expect(h.controller.state.getSnapshot().creditFunded).toBe(true)
+  it('keeps a stored credit step readable after an earlier build saved it', async () => {
+    const h = await harness({ status: 'credential-stored', progress: { step: 'credit' } })
+    expect(h.controller.state.getSnapshot()).toMatchObject({ status: 'ready', progress: { step: 'credit' } })
   })
 
   it.each(['welcome', 'done'] as const)('covers the main page while saved %s progress loads for a signed-in account', async (step) => {
@@ -477,15 +427,6 @@ it('retries failed invisible API-key completion after credential invalidation', 
   h.refuse()
   h.controller.invalidateCredentials()
   await vi.waitFor(() => { expect(h.controller.state.getSnapshot().progress.completion).toBe('api-key') })
-})
-
-it('keeps ordinary actions when restoring credit before its balance arrives', async () => {
-  const h = await harness({ status: 'credential-stored', progress: { step: 'credit' } })
-  expect(h.controller.state.getSnapshot()).toMatchObject({ status: 'ready', creditFunded: false })
-  h.account.set({ ...h.account.getSnapshot(), details: { balance: {
-    status: 'ready', bonusWallets: [], value: [{ currency: 'CNY', balance: '1' }],
-  } } })
-  expect(h.controller.state.getSnapshot()).toMatchObject({ status: 'ready', creditFunded: false })
 })
 
 it('refuses navigation before progress loads and after completion', async () => {

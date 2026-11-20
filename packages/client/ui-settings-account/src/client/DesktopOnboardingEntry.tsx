@@ -8,7 +8,7 @@ import { OnboardingSurface } from './OnboardingSurface.tsx'
 import { DesktopOnboarding } from './DesktopOnboarding.tsx'
 
 /** Observable sources and actions supplied by the account plugin's apply closure. */
-export interface DesktopOnboardingInjected extends Omit<DesktopOnboardingProps, 'state' | 'account' | 't' | 'exiting' | 'locale'> {
+export interface DesktopOnboardingInjected extends Omit<DesktopOnboardingProps, 'state' | 't' | 'exiting' | 'locale'> {
   /** Publish whether onboarding covers the workspace. @param visible - includes loading, saving, and exit animation. */
   setVisible: (visible: boolean) => void
   hooks: {
@@ -60,5 +60,5 @@ export function DesktopOnboardingEntry({ useOnboarding, useAccount, setVisible, 
   if (displayed === null) return state.status === 'loading'
     ? <OnboardingSurface><div role="status">{props.t('onboardingLoading')}</div></OnboardingSurface> : null
   return <DesktopOnboarding {...props} locale={locale} state={pendingCompletion ? { ...displayed, status: 'saving' } : displayed}
-    account={account} exiting={exiting} />
+    exiting={exiting} />
 }

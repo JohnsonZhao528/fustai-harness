@@ -11,11 +11,11 @@ export interface ProductEventMap {
   onboarding_page_view: { page_name: OnboardingPage }
   onboarding_page_click: {
     page_name: OnboardingPage
-    button_name: 'next' | 'back' | 'skip' | 'charge' | 'later' | 'continue'
+    button_name: 'next' | 'back' | 'skip'
     selected_content?: 'office' | 'code' | 'code_office' | 'focus_result' | 'key_detail' | 'full_process'
   }
-  onboarding_popup_view: { popup_name: 'skip_charge' | 'skip_setting' }
-  onboarding_popup_click: { popup_name: 'skip_charge' | 'skip_setting'; button_name: 'charge' | 'know' | 'enter' | 'setting' | 'close' }
+  onboarding_popup_view: { popup_name: 'skip_setting' }
+  onboarding_popup_click: { popup_name: 'skip_setting'; button_name: 'enter' | 'setting' | 'close' }
   desktop_upgrade_click: Record<string, never>
   desktop_upgrade_download_result: { is_success: boolean; error_reason?: string }
   desktop_upgrade_install_restart_click: Record<string, never>
@@ -50,7 +50,7 @@ export interface ProductEventMap {
 }
 
 /** Public page names independent of internal onboarding state names. */
-export type OnboardingPage = 'onboarding_welcome' | 'onboarding_recharge' | 'onboarding_use_case' | 'onboarding_process'
+export type OnboardingPage = 'onboarding_welcome' | 'onboarding_use_case' | 'onboarding_process'
 
 /** Correlated event name and attributes for the authenticated analytics RPC. */
 export type ProductEvent = {

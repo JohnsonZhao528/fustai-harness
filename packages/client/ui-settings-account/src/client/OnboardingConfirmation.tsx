@@ -1,34 +1,26 @@
-/** Credit and setup confirmations with contained keyboard focus. */
+/** Setup confirmation with contained keyboard focus. */
 import { Button, IconCloseOutlineRegular, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { DesktopOnboardingProps } from './onboarding-contract.ts'
 import css from './DesktopOnboarding.module.css'
 
-/** The action requiring confirmation, including skipping directly from the credit page. */
-export type OnboardingConfirmationKind = 'credit' | 'credit-skip' | 'skip'
-
-/** @param props - confirmation action, localized copy and navigation callbacks. @returns a focus-contained dialog. */
-export function OnboardingConfirmation({ kind, t, busy, canRecharge, onClose, onContinueSetup, onContinue, onRecharge, onSkip }:
+/** @param props - localized copy and navigation callbacks. @returns a focus-contained dialog. */
+export function OnboardingConfirmation({ t, busy, onClose, onContinueSetup, onSkip }:
   Pick<DesktopOnboardingProps, 't'> & {
-    kind: OnboardingConfirmationKind
     busy: boolean
-    canRecharge: boolean
     onClose: () => void
     onContinueSetup: () => void
-    onContinue: () => void
-    onRecharge: () => void
     onSkip: () => void
   }) {
-  const credit = kind !== 'skip'
-  const title = t(credit ? 'onboardingNoCreditTitle' : 'onboardingSkipTitle')
+  const title = t('onboardingSkipTitle')
   return <Modal open headless backdropBlur={false} title={title} onClose={onClose}>
     <div className={css.confirmation}>
       <div className={css.confirmationHeading}><h2>{title}</h2>
         <button type="button" className={css.confirmationClose} aria-label={t('close')} onClick={onClose}><IconCloseOutlineRegular size={14} /></button>
       </div>
-      <p>{t(credit ? 'onboardingNoCreditDescription' : 'onboardingSkipDescription')}</p>
+      <p>{t('onboardingSkipDescription')}</p>
       <div className={css.confirmationActions}>
-        <Button className={css.dialogButton} variant="outline" disabled={busy} onClick={kind === 'credit-skip' ? onSkip : kind === 'credit' ? onContinue : onContinueSetup}>{t(credit ? 'onboardingUnderstood' : 'onboardingKeepSetting')}</Button>
-        <Button className={css.dialogButton} variant="primary" disabled={busy || (credit && !canRecharge)} onClick={credit ? onRecharge : onSkip}>{t(credit ? 'onboardingGoTopUp' : 'onboardingEnter')}</Button>
+        <Button className={css.dialogButton} variant="outline" disabled={busy} onClick={onContinueSetup}>{t('onboardingKeepSetting')}</Button>
+        <Button className={css.dialogButton} variant="primary" disabled={busy} onClick={onSkip}>{t('onboardingEnter')}</Button>
       </div>
     </div>
   </Modal>

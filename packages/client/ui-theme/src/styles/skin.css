@@ -1,0 +1,170 @@
+/* Skins: re-hue the palette selected by `body[data-ds-dark-theme]`.
+ *
+ * Loaded after design-platform.css, so an equally specific skin block wins the
+ * cascade; the `[data-dsh-skin][data-ds-dark-theme]` blocks win over the base
+ * dark palette. A skin owns surfaces, ink scale, accent, and corner radii — it
+ * never decides light versus dark, which stays the Appearance preference. */
+
+/* ---------------------------------------------------------------- skin A —
+ * Ink Paper: warm paper canvas, white cards, teal accent, soft corners. */
+
+body[data-dsh-skin='a'] {
+  --dsw-static-neutral-bluish-00: rgb(255, 255, 255);
+  --dsw-static-neutral-bluish-50: rgb(247, 245, 239);
+  --dsw-static-neutral-bluish-60: rgb(243, 240, 232);
+  --dsw-static-neutral-bluish-75: rgb(237, 233, 223);
+  --dsw-static-neutral-bluish-100: rgb(231, 226, 214);
+  --dsw-static-neutral-bluish-150: rgb(225, 220, 205);
+  --dsw-static-neutral-bluish-200: rgb(216, 210, 194);
+  --dsw-static-neutral-bluish-300: rgb(196, 189, 171);
+  --dsw-static-neutral-bluish-400: rgb(167, 159, 141);
+  --dsw-static-neutral-bluish-500: rgb(143, 135, 117);
+  --dsw-static-neutral-bluish-600: rgb(120, 112, 95);
+  --dsw-static-neutral-bluish-700: rgb(92, 86, 72);
+  --dsw-static-neutral-bluish-750: rgb(73, 68, 57);
+  --dsw-static-neutral-bluish-800: rgb(56, 51, 43);
+  --dsw-static-neutral-bluish-850: rgb(43, 39, 33);
+  --dsw-static-neutral-bluish-875: rgb(35, 31, 26);
+  --dsw-static-neutral-bluish-900: rgb(27, 24, 20);
+  --dsw-static-neutral-bluish-950: rgb(18, 19, 16);
+  --dsw-static-neutral-bluish-1000: rgb(22, 33, 30);
+  --dsw-radius-sm: 10px;
+  --dsw-radius-md: 14px;
+  --dsw-radius-lg: 18px;
+  --dsw-radius-xl: 22px;
+  --dsw-radius-panel: 30px;
+}
+
+body[data-dsh-skin='a']:not([data-ds-dark-theme]) {
+  --dsw-alias-bg-base: rgb(245, 243, 237);
+  --dsw-alias-bg-layer-1: rgb(255, 255, 255);
+  --dsw-alias-bg-layer-2: rgb(255, 255, 255);
+  --dsw-alias-bg-layer-3: rgb(255, 255, 255);
+  --dsw-alias-bg-module-platform: rgb(240, 236, 227);
+  --dsw-specific-sidebar-fill: rgb(239, 236, 228);
+  --dsw-alias-brand-primary: rgb(14, 122, 99);
+  --dsw-alias-brand-text: rgb(14, 122, 99);
+  --dsw-alias-link: rgb(14, 122, 99);
+}
+
+body[data-dsh-skin='a'][data-ds-dark-theme] {
+  --dsw-alias-bg-base: rgb(18, 19, 16);
+  --dsw-alias-bg-layer-1: rgb(26, 27, 23);
+  --dsw-alias-bg-layer-2: rgb(33, 34, 30);
+  --dsw-alias-bg-layer-3: rgb(40, 41, 36);
+  --dsw-alias-bg-module-platform: rgb(35, 36, 31);
+  --dsw-specific-sidebar-fill: rgb(12, 13, 11);
+  --dsw-alias-brand-primary: rgb(53, 196, 164);
+  --dsw-alias-brand-text: rgb(53, 196, 164);
+  --dsw-alias-link: rgb(70, 209, 178);
+}
+
+/* ---------------------------------------------------------------- skin B —
+ * Edge: cool graphite, near-black dark canvas, lime accent, sharp corners. */
+
+body[data-dsh-skin='b'] {
+  --dsw-static-neutral-bluish-00: rgb(255, 255, 255);
+  --dsw-static-neutral-bluish-50: rgb(247, 247, 248);
+  --dsw-static-neutral-bluish-60: rgb(243, 243, 245);
+  --dsw-static-neutral-bluish-75: rgb(237, 237, 239);
+  --dsw-static-neutral-bluish-100: rgb(231, 231, 234);
+  --dsw-static-neutral-bluish-150: rgb(224, 224, 227);
+  --dsw-static-neutral-bluish-200: rgb(213, 213, 217);
+  --dsw-static-neutral-bluish-300: rgb(193, 193, 198);
+  --dsw-static-neutral-bluish-400: rgb(155, 155, 162);
+  --dsw-static-neutral-bluish-500: rgb(131, 131, 138);
+  --dsw-static-neutral-bluish-600: rgb(108, 108, 115);
+  --dsw-static-neutral-bluish-700: rgb(84, 84, 90);
+  --dsw-static-neutral-bluish-750: rgb(65, 65, 71);
+  --dsw-static-neutral-bluish-800: rgb(48, 48, 52);
+  --dsw-static-neutral-bluish-850: rgb(36, 36, 40);
+  --dsw-static-neutral-bluish-875: rgb(28, 28, 32);
+  --dsw-static-neutral-bluish-900: rgb(21, 21, 24);
+  --dsw-static-neutral-bluish-950: rgb(14, 14, 17);
+  --dsw-static-neutral-bluish-1000: rgb(11, 11, 12);
+  --dsw-radius-xs: 2px;
+  --dsw-radius-sm: 4px;
+  --dsw-radius-md: 6px;
+  --dsw-radius-lg: 8px;
+  --dsw-radius-xl: 10px;
+  --dsw-radius-panel: 14px;
+}
+
+body[data-dsh-skin='b']:not([data-ds-dark-theme]) {
+  --dsw-alias-bg-base: rgb(247, 247, 245);
+  --dsw-alias-bg-layer-1: rgb(255, 255, 255);
+  --dsw-alias-bg-layer-2: rgb(255, 255, 255);
+  --dsw-alias-bg-layer-3: rgb(255, 255, 255);
+  --dsw-alias-bg-module-platform: rgb(241, 241, 240);
+  --dsw-specific-sidebar-fill: rgb(239, 239, 241);
+  --dsw-alias-brand-primary: rgb(95, 112, 0);
+  --dsw-alias-brand-text: rgb(95, 112, 0);
+  --dsw-alias-link: rgb(95, 112, 0);
+}
+
+body[data-dsh-skin='b'][data-ds-dark-theme] {
+  --dsw-alias-bg-base: rgb(11, 11, 12);
+  --dsw-alias-bg-layer-1: rgb(17, 17, 19);
+  --dsw-alias-bg-layer-2: rgb(23, 23, 26);
+  --dsw-alias-bg-layer-3: rgb(30, 30, 33);
+  --dsw-alias-bg-module-platform: rgb(27, 27, 31);
+  --dsw-specific-sidebar-fill: rgb(8, 8, 10);
+  --dsw-alias-brand-primary: rgb(200, 247, 81);
+  --dsw-alias-brand-text: rgb(200, 247, 81);
+  --dsw-alias-link: rgb(200, 247, 81);
+}
+
+/* ---------------------------------------------------------------- skin C —
+ * Air: cream canvas, terracotta accent, rounder corners. */
+
+body[data-dsh-skin='c'] {
+  --dsw-static-neutral-bluish-00: rgb(255, 255, 255);
+  --dsw-static-neutral-bluish-50: rgb(253, 248, 242);
+  --dsw-static-neutral-bluish-60: rgb(250, 243, 234);
+  --dsw-static-neutral-bluish-75: rgb(246, 238, 227);
+  --dsw-static-neutral-bluish-100: rgb(241, 231, 218);
+  --dsw-static-neutral-bluish-150: rgb(237, 225, 210);
+  --dsw-static-neutral-bluish-200: rgb(230, 215, 197);
+  --dsw-static-neutral-bluish-300: rgb(214, 193, 172);
+  --dsw-static-neutral-bluish-400: rgb(185, 155, 132);
+  --dsw-static-neutral-bluish-500: rgb(160, 132, 109);
+  --dsw-static-neutral-bluish-600: rgb(136, 112, 93);
+  --dsw-static-neutral-bluish-700: rgb(109, 90, 74);
+  --dsw-static-neutral-bluish-750: rgb(87, 70, 57);
+  --dsw-static-neutral-bluish-800: rgb(68, 54, 44);
+  --dsw-static-neutral-bluish-850: rgb(54, 42, 34);
+  --dsw-static-neutral-bluish-875: rgb(44, 34, 28);
+  --dsw-static-neutral-bluish-900: rgb(35, 27, 23);
+  --dsw-static-neutral-bluish-950: rgb(24, 18, 16);
+  --dsw-static-neutral-bluish-1000: rgb(42, 33, 29);
+  --dsw-radius-xs: 6px;
+  --dsw-radius-sm: 10px;
+  --dsw-radius-md: 14px;
+  --dsw-radius-lg: 18px;
+  --dsw-radius-xl: 24px;
+  --dsw-radius-panel: 32px;
+}
+
+body[data-dsh-skin='c']:not([data-ds-dark-theme]) {
+  --dsw-alias-bg-base: rgb(251, 247, 242);
+  --dsw-alias-bg-layer-1: rgb(255, 255, 255);
+  --dsw-alias-bg-layer-2: rgb(255, 255, 255);
+  --dsw-alias-bg-layer-3: rgb(255, 255, 255);
+  --dsw-alias-bg-module-platform: rgb(244, 234, 223);
+  --dsw-specific-sidebar-fill: rgb(246, 239, 230);
+  --dsw-alias-brand-primary: rgb(192, 69, 31);
+  --dsw-alias-brand-text: rgb(192, 69, 31);
+  --dsw-alias-link: rgb(192, 69, 31);
+}
+
+body[data-dsh-skin='c'][data-ds-dark-theme] {
+  --dsw-alias-bg-base: rgb(20, 17, 16);
+  --dsw-alias-bg-layer-1: rgb(27, 23, 21);
+  --dsw-alias-bg-layer-2: rgb(34, 29, 26);
+  --dsw-alias-bg-layer-3: rgb(42, 36, 32);
+  --dsw-alias-bg-module-platform: rgb(42, 35, 32);
+  --dsw-specific-sidebar-fill: rgb(15, 12, 11);
+  --dsw-alias-brand-primary: rgb(255, 122, 80);
+  --dsw-alias-brand-text: rgb(255, 122, 80);
+  --dsw-alias-link: rgb(255, 138, 99);
+}

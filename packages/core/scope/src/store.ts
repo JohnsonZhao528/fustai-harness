@@ -105,6 +105,48 @@ export class NamedEntries<V> implements EntryValues<V> {
 }
 
 /**
+ * Track which owner supplied each live registration of a name.
+ *
+ * Registries that attribute a registration to the plugin that made it record
+ * one owner per live registration here. Removing a registration restores the
+ * owner recorded before it, so discovery keeps naming a live contributor.
+ */
+export class NamedOwners<O> {
+  private readonly owners = new Map<string, O[]>()
+
+  /**
+   * Record one live registration of `name`.
+   * @param name - registered name.
+   * @param owner - the registration's owner; repeat registrations by one owner stay separate.
+   * @returns an idempotent undo that forgets only this registration.
+   */
+  track(name: string, owner: O): () => void {
+    let owners = this.owners.get(name)
+    if (owners === undefined) {
+      owners = []
+      this.owners.set(name, owners)
+    }
+    owners.push(owner)
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      owners.splice(owners.indexOf(owner), 1)
+      if (owners.length === 0) this.owners.delete(name)
+    }
+  }
+
+  /**
+   * Read the most recently recorded live owner of `name`.
+   * @param name - registered name.
+   * @returns that owner, or `undefined` when no registration is tracked.
+   */
+  latest(name: string): O | undefined {
+    return this.owners.get(name)?.at(-1)
+  }
+}
+
+/**
  * Insertion-ordered anonymous entries with independent registration identity.
  *
  * Equal values remain separate registrations. Values are borrowed, and

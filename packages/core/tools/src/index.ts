@@ -5,9 +5,10 @@
  */
 
 import type {} from '@deepseek-ai/dsh-working-directory'
+import type {} from '@deepseek-ai/cordis-plugin-loader'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { AnonymousEntries, NamedEntries, ScopedLayers, scopeOf, scopeTarget } from '@deepseek-ai/dsh-scope'
+import { AnonymousEntries, NamedEntries, NamedOwners, ScopedLayers, scopeOf, scopeTarget } from '@deepseek-ai/dsh-scope'
 import type { ScopeKey, ScopeLayer, Scoped } from '@deepseek-ai/dsh-scope'
 import type { ToolCallId, ContentBlock, ToolSchema } from '@deepseek-ai/dsh-llm'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
@@ -801,6 +802,39 @@ function resolveMaxParallelSubCalls(value: number | undefined): number {
   return maxParallelSubCalls
 }
 
+/** The configuration row that owns a registration. */
+export interface RegistrationOwner {
+  /** Entry-tree identity, unique across the profile and stable across reloads. */
+  readonly entryId: string
+  /** Id of the owning row inside its entry tree. */
+  readonly rowId: string
+  /** Module specifier the owning entry imports. */
+  readonly moduleName: string
+}
+
+/**
+ * Follow a context's fiber ancestors to the nearest Loader entry.
+ *
+ * Registrations are made through whichever context the caller holds: a plugin's
+ * own context or a scope minted under it (an agent context, a preset). Only
+ * entry fibers carry `entry`, and the chain ends where a fiber is its own
+ * parent, so the walk terminates without a visited set.
+ * @param ctx - context the registration was made through.
+ * @returns the owning entry's identity, or `undefined` outside any Loader entry.
+ */
+function registrationOwner(ctx: Context): RegistrationOwner | undefined {
+  let fiber = ctx.fiber
+  for (;;) {
+    const entry = fiber.entry
+    if (entry !== undefined) {
+      return { entryId: entry.id, rowId: entry.options.id, moduleName: entry.options.name }
+    }
+    const parent = fiber.parent.fiber
+    if (parent === fiber) return undefined
+    fiber = parent
+  }
+}
+
 /**
  * Tool registry and execution pipeline. Scoped registrations shadow globals;
  * one visibility resolver feeds presentation, lookup, and dispatch.
@@ -835,6 +869,8 @@ export class ToolRuntime extends Service {
     scope => new ToolLayer(scope),
     () => { this.ctx.emit('tools/change') },
   )
+  /** Owners of the live registrations per name, in registration order. */
+  private readonly registrationOwners = new NamedOwners<RegistrationOwner>()
   /** Presentation for scopes that declare none; {@link presentAs} shadows it per scope. */
   private readonly defaultMode: ToolPresentationMode
   private readonly maxParallelSubCalls: number
@@ -1088,11 +1124,27 @@ export class ToolRuntime extends Service {
     if (name === RUN_CODE_NAME) {
       throw new Error(`tool name "${RUN_CODE_NAME}" is reserved for the PTC mode presentation transport and cannot be registered or shadowed`)
     }
-    return this.layers.effect(
+    const owner = registrationOwner(this.ctx)
+    const dispose = this.layers.effect(
       this.ctx,
       layer => layer.tools.insert(name, definition),
       { label: 'tools.register()' },
     )
+    if (owner === undefined) return dispose
+    const untrack = this.registrationOwners.track(name, owner)
+    return () => {
+      untrack()
+      dispose()
+    }
+  }
+
+  /**
+   * Report which Loader entry registered the most recent live tool named `name`.
+   * @param name - public tool name.
+   * @returns the owning entry, or `undefined` for an unknown tool or one registered outside a Loader entry.
+   */
+  ownerOf(name: string): RegistrationOwner | undefined {
+    return this.registrationOwners.latest(name)
   }
 
   /**

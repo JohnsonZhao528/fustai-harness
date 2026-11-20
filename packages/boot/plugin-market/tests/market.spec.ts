@@ -141,6 +141,34 @@ it('reads an index with installation status, compatibility, and install argument
   expect(market.listIndexes()).toEqual([{ url: URL_A, title: { en: 'Market', zh: '市场' }, description: 'Bundles' }])
 })
 
+it('lets a fetch hook answer an index read in place of the network', async () => {
+  const { ctx, market } = await mount()
+  const network = serve()
+  const seen: string[] = []
+  ctx.on('plugin-market/fetch-response', async (url) => {
+    seen.push(url)
+    return json(index([entry('mirrored')]))
+  })
+  const listing = await read(market, URL_A)
+  expect(listing.entries.map(item => item.name)).toEqual(['mirrored'])
+  expect(seen).toEqual([URL_A])
+  expect(network).not.toHaveBeenCalled()
+})
+
+it('falls through to the default fetch when a hook delegates', async () => {
+  const { ctx, market } = await mount()
+  const network = serve(json(index([entry('network')])))
+  const seen = vi.fn()
+  ctx.on('plugin-market/fetch-response', async (url, init, next) => {
+    seen(url, init)
+    return next()
+  })
+  const listing = await read(market, URL_A)
+  expect(listing.entries.map(item => item.name)).toEqual(['network'])
+  expect(network).toHaveBeenCalledTimes(1)
+  expect(seen).toHaveBeenCalledWith(URL_A, expect.objectContaining({ redirect: 'error', headers: { accept: 'application/json' } }))
+})
+
 it('defaults to the highest compatible stable version, or the highest compatible prerelease without a stable one', async () => {
   serve(json(index([
     entry('mixed', {}, [release('2.0.0-rc.1'), release('1.0.0'), release('1.1.0', { engines: { dsh: '0.0.1' } })]),

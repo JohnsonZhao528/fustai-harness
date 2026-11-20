@@ -1,4 +1,4 @@
-/** `settings.theme` namespace dictionaries (the Appearance and font settings rows' copy). */
+/** `settings.theme` namespace dictionaries (the Appearance, skin, and font settings rows' copy). */
 
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
@@ -6,6 +6,13 @@ export const zh = {
   'appearance.light': '浅色',
   'appearance.dark': '深色',
   'appearance.system': '跟随系统',
+  'skin.title': '皮肤',
+  'skin.a': '墨纸',
+  'skin.a.description': '暖纸底色 · 松石绿',
+  'skin.b': '锋刃',
+  'skin.b.description': '冷灰底色 · 青柠',
+  'skin.c': '清风',
+  'skin.c.description': '奶油底色 · 陶土橙',
   'fontSize.text.title': '字号大小',
   'fontSize.text.description': '仅影响会话内容的字号',
   'fontSize.text.increase': '增大字号',
@@ -38,6 +45,13 @@ export const en = {
   'appearance.light': 'Light',
   'appearance.dark': 'Dark',
   'appearance.system': 'System',
+  'skin.title': 'Skin',
+  'skin.a': 'Ink Paper',
+  'skin.a.description': 'Warm paper · teal accent',
+  'skin.b': 'Edge',
+  'skin.b.description': 'Cool gray · lime accent',
+  'skin.c': 'Air',
+  'skin.c.description': 'Cream · terracotta accent',
   'fontSize.text.title': 'Font size',
   'fontSize.text.description': 'Only affects conversation content',
   'fontSize.text.increase': 'Increase font size',

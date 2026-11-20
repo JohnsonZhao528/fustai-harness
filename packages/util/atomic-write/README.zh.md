@@ -9,7 +9,7 @@ kind: "package-library"
 
 ## 概述
 
-使用 `dsh-atomic-write` 替换文件时，不会暴露部分内容，也不会跟随临时路径上的符号链接。它的写锁会跨进程串行化读-修改-写入循环，因此并发写入方不会用陈旧状态相互覆盖。每次替换都会在全新 inode 上使用调用方选择的权限位，从而安全地收窄现有文件的权限。这个零依赖库接受字符串和二进制字节数组；它不提供 `cordis.yml` 插件，也不保证崩溃持久性，因为它不调用 `fsync`。
+使用 `dsh-atomic-write` 替换文件时，不会暴露部分内容，也不会跟随临时路径上的符号链接；它还能把一个完整文件发布到尚不存在的名字上。它的写锁会跨进程串行化读-修改-写入循环，因此并发写入方不会用陈旧状态相互覆盖。每次替换都会在全新 inode 上使用调用方选择的权限位，从而安全地收窄现有文件的权限。这个零依赖库接受字符串和二进制字节数组；它不提供 `cordis.yml` 插件，也不保证崩溃持久性，因为它不调用 `fsync`。
 
 ## 目录
 
@@ -37,6 +37,20 @@ await writeFileAtomic('/home/u/.dsh/cordis.patch.yml', text, { mode: 0o600 })
 ```
 
 父目录会按需创建，读取方只会观察到旧内容或完整的新内容。在 Windows 上，报告为 `EACCES`、`EBUSY` 或 `EPERM` 的瞬时替换干扰会在有界时间内重试；任何剩余失败都会移除临时文件，并保持目标文件不变。
+
+### 把文件发布到空闲名字上
+
+当已存在的完整文件必须出现在一个尚不存在的名字上时——发布已完成物化的会话日志，或存放并发写入方可能已经写好的 blob——使用 `linkOrCopyExclusive`：
+
+```ts
+import { linkOrCopyExclusive } from '@deepseek-ai/dsh-atomic-write'
+
+declare const stagingPath: string
+declare const finalPath: string
+await linkOrCopyExclusive(stagingPath, finalPath)
+```
+
+快路径是 `link()`：一个 inode 挂两个名字，名字被占用时以 `EEXIST` 失败。当宿主拒绝硬链接时——Android 应用存储在 SELinux 下拒绝，目标位于另一设备时报告 `EXDEV`——先把源文件复制到随机后缀的同级文件，再 rename 到位，因此读取方绝不会在发布名上看到部分内容。该副本是独立 inode，继续通过源文件写入的调用方不能指望发布名跟随这些写入。其余 `link()` 失败（包括名字已被占用）仍是调用方自己的结果。
 
 ### 协调写入方
 
@@ -76,7 +90,7 @@ Windows 在无法观察到锁时会对 `EPERM` 重试一次，因为持锁方可
 
 | 文件 | 职责 |
 |---|---|
-| [`src/index.ts`](src/index.ts) | `writeFileAtomic` 与 `withFileLock`，即本包的全部接口 |
+| [`src/index.ts`](src/index.ts) | `writeFileAtomic`、`linkOrCopyExclusive` 与 `withFileLock`，即本包的全部接口 |
 
 ### 写入路径
 
@@ -123,6 +137,7 @@ Windows 在无法观察到锁时会对 `EPERM` 重试一次，因为持锁方可
 
 - **原子但不保证持久**——不对文件或其所在目录做 `fsync`，因此崩溃后可能观察到 rename 被回退。此处的文件型存储在启动时重新读取并重新发布，把持久性留作调用方的策略。
 - **调用方提供完整内容**——接受字符串或 `Uint8Array`（包括 `Buffer`）；不支持流式写入。
+- **硬链接回退会复制整个文件**——宿主拒绝 `link()` 时，发布要付出一次完整源文件复制及其占用的磁盘空间，且发布名是独立 inode，而不是源文件的第二个名字。
 - **部分遗留锁需要操作者恢复**——锁记录为空或不完整，或其 PID 已被存活进程复用时，锁会留在原地；后续写入方超时也不会删除它。竞争者若在创建认领文件与移除锁之间结束，会同时留下 `<filename>.lock` 和 `<filename>.lock.takeover-<记录哈希>`，由操作者删除两者。
 - **单一主机与单一 PID 命名空间**——探测在竞争者所在主机上进行。多台主机通过网络文件系统共享、或多个容器共享同一卷时，写入方可能把存活持有者视为已退出，接管其锁并与之同时写入。
 

@@ -38,6 +38,13 @@ export interface AccountView {
   readonly status: 'signed-out' | 'credential-stored'
   readonly links: AccountLinks
   readonly attempt: SignInAttemptView | null
+  /**
+   * Present only while a sign-in has pointed this machine's account data at a different directory
+   * than the one the running Host booted with. Sessions, settings, and credentials keep serving the
+   * booted directory until the application restarts, so the sign-in takes full effect only after
+   * that restart. Absent once the restarted Host resolves the same directory it is running with.
+   */
+  readonly restartRequired?: true
 }
 
 /** Platform account identifier supplied by the current-user endpoint. */

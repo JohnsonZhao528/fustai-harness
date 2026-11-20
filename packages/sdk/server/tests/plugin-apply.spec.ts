@@ -220,7 +220,10 @@ describe('dsh-sdk-jsonrpc-server plugin apply', () => {
         method: 'initialize',
         params: { cwd: storageDir, provider: 'delayed-private', model: 'apply-model' },
       }
-      const probe = { jsonrpc: '2.0', id: 'probe-during-delay', method: 'nope/unknown' }
+      // Any method that answers without the Loader works as the probe: unknown
+      // methods settle the Loader before extension resolution, so they would
+      // wait for the delayed plugin too.
+      const probe = { jsonrpc: '2.0', id: 'probe-during-delay', method: 'session/wait', params: {} }
       harness.sendRaw(`${JSON.stringify(initialize)}\n${JSON.stringify(probe)}\n`)
 
       // The transport processes independent requests concurrently. Receiving

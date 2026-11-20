@@ -50,6 +50,47 @@ describe('Agent', () => {
     await agent.whenIdle()
   })
 
+  it('wake() opens a turn for input parked while idle', async () => {
+    const adapter = new MockAdapter([textResponse('ok')])
+    const ctx = await harness(adapter)
+    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+
+    agent.inject(createUserMessage({ content: [{ type: 'text', text: 'parked' }], source: { kind: 'p' } }))
+    agent.wake()
+    await agent.whenIdle()
+
+    expect(adapter.requests).toHaveLength(1)
+  })
+
+  it('wake() without parked input leaves the agent idle', async () => {
+    const adapter = new MockAdapter([textResponse('ok')])
+    const ctx = await harness(adapter)
+    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+
+    agent.wake()
+
+    expect(agent.status).toBe('idle')
+    expect(agent.session.snapshotEvents()).toHaveLength(0)
+    expect(adapter.requests).toHaveLength(0)
+  })
+
+  it('wake() during a turn leaves that turn to its own driver', async () => {
+    const adapter = new MockAdapter(['hang'])
+    const ctx = await harness(adapter)
+    const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
+
+    send(agent, 'queued')
+    await vi.waitFor(() => { expect(adapter.requests).toHaveLength(1) })
+    agent.wake()
+    await Promise.resolve()
+
+    expect(agent.status).toBe('running')
+    expect(adapter.requests).toHaveLength(1)
+
+    agent.cancel({ kind: 'user' })
+    await agent.whenIdle()
+  })
+
   it('inject() preserves an unknown producer source', async () => {
     const ctx = await harness(new MockAdapter([textResponse('ok')]))
     const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })

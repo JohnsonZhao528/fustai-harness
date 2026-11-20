@@ -117,6 +117,13 @@
     - id: authorization
       name: '@deepseek-ai/dsh-authorization'
 
+    # Browser sign-in against the FustAI account center, and the inference key it provisions on success.
+    - id: deepseek-account
+      name: '@deepseek-ai/dsh-deepseek-account-platform'
+      config:
+        platformOrigin: https://account.fustai.com
+        desktopPlatform: !!js "ctx.get('profileContext')?.name === 'desktop' && ['darwin', 'win32'].includes(process.platform) ? process.platform : null"
+
     - id: credentials
       name: '@deepseek-ai/dsh-credentials-local'
 

@@ -172,6 +172,14 @@ export class ReactLoopAgent implements Agent {
     this.send(input, 'next-step', false)
   }
 
+  wake(): void {
+    // Idle with nothing parked has no turn to open, and a live driver claims
+    // its own queued work; only parked input left behind by a converged
+    // activity needs a driver of its own.
+    if (this.phase.kind !== 'idle' || !this.inbox.hasPending) return
+    this.wakeDriver()
+  }
+
   cancel(cause: AgentCancelCause, options: CancelOptions = {}): void {
     if (!options.keepInbox) {
       this.inbox.clear()

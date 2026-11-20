@@ -717,3 +717,59 @@ describe('scoped execution dispatch', () => {
     ]))
   })
 })
+
+describe('ToolRuntime.ownerOf()', () => {
+  /** Stand in for the Loader annotation the registry reads without booting a Loader. */
+  function annotate(context: Context, entryId: string, rowId: string, moduleName: string): void {
+    Object.defineProperty(context.fiber, 'entry', {
+      value: { id: entryId, options: { id: rowId, name: moduleName } },
+      configurable: true,
+    })
+  }
+
+  it('reports no owner for unknown tools or registrations outside a Loader entry', async () => {
+    const ctx = await mount()
+
+    expect(ctx.tools.ownerOf('missing')).toBeUndefined()
+    ctx.tools.register(tool('plain'))
+
+    expect(ctx.tools.ownerOf('plain')).toBeUndefined()
+  })
+
+  it('attributes a registration to the entry of the registering context', async () => {
+    const ctx = await mount()
+    annotate(ctx, 'profile:0', 'row-0', '@scope/plugin')
+    const dispose = ctx.tools.register(tool('owned'))
+
+    expect(ctx.tools.ownerOf('owned')).toEqual({ entryId: 'profile:0', rowId: 'row-0', moduleName: '@scope/plugin' })
+
+    dispose()
+    expect(ctx.tools.ownerOf('owned')).toBeUndefined()
+  })
+
+  it('walks to the nearest entry from a scoped context without one', async () => {
+    const ctx = await mount()
+    annotate(ctx, 'profile:0', 'row-0', '@scope/plugin')
+    const { scope } = await mintAgentScope(ctx, 'a')
+
+    scope.ctx.tools.register(tool('owned'))
+
+    expect(ctx.tools.ownerOf('owned')).toEqual({ entryId: 'profile:0', rowId: 'row-0', moduleName: '@scope/plugin' })
+  })
+
+  it('reports the most recent owner and restores the displaced one', async () => {
+    const ctx = await mount()
+    annotate(ctx, 'profile:0', 'row-0', '@scope/plugin')
+    const { scope } = await mintAgentScope(ctx, 'a')
+    annotate(scope.ctx, 'profile:0', 'row-1', '@scope/inner')
+
+    const disposeGlobal = ctx.tools.register(tool('owned'))
+    const disposeScoped = scope.ctx.tools.register(tool('owned'))
+
+    expect(ctx.tools.ownerOf('owned')?.rowId).toBe('row-1')
+    disposeScoped()
+    expect(ctx.tools.ownerOf('owned')?.rowId).toBe('row-0')
+    disposeGlobal()
+    expect(ctx.tools.ownerOf('owned')).toBeUndefined()
+  })
+})

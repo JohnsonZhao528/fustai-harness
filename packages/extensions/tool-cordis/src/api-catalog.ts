@@ -648,6 +648,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the exact effect disposer that unregisters this definition.',
       },
       {
+        signature: 'ownerOf(name: string): RegistrationOwner | undefined',
+        description: 'Report which Loader entry registered the most recent live command named `name`.',
+        parameters: [{ name: 'name', description: 'command name without the leading slash.' }],
+        returns: 'the owning entry, or `undefined` for an unknown command or one registered outside a Loader entry.',
+      },
+      {
         signature: 'registerFileReceiptResolver(resolver: CommandFileReceiptResolver): () => void',
         description: 'Register the sole authority that resolves staged file receipts for command submissions.',
         parameters: [{ name: 'resolver', description: 'Session-aware receipt resolver.' }],
@@ -3429,6 +3435,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the exact disposer that unregisters the tool.',
       },
       {
+        signature: 'ownerOf(name: string): RegistrationOwner | undefined',
+        description: 'Report which Loader entry registered the most recent live tool named `name`.',
+        parameters: [{ name: 'name', description: 'public tool name.' }],
+        returns: 'the owning entry, or `undefined` for an unknown tool or one registered outside a Loader entry.',
+      },
+      {
         signature: 'restrict(filter: ToolRestriction): () => void',
         description: 'Restrict global tools for the calling agent scope. Empty filters, unknown names, scope-local names, and reserved transport names fail. Restrictions intersect; scoped registrations remain visible.',
         parameters: [{ name: 'filter', description: 'global-tool mask: `allow` (keep only) and/or `deny` (remove).' }],
@@ -4414,12 +4426,36 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [],
   },
   {
+    name: 'plugin-market/fetch-response',
+    mode: 'waterfall',
+    signature: '\'plugin-market/fetch-response\'(url: string, init: RequestInit, next: () => Promise<Response>): Promise<Response>',
+    summary: 'The response for one index document read.',
+    description: 'The response for one index document read. Calling `next()` performs the default `fetch`; a listener that answers for a URL itself must return a response for exactly that document and leave `next()` uncalled. A deployment that reaches the configured URL through a mirror answers here instead of configuring the mirror as a second index source.',
+    parameters: [{ name: 'url', description: 'the configured index URL being read.' }, { name: 'init', description: 'the request the default fetch sends, including the abort signal and deadline.' }],
+  },
+  {
     name: 'schedule/changed',
     mode: 'emit',
     signature: '\'schedule/changed\'(): void',
     summary: 'Durable task set changed; clients refetch global task and Session-active catalogs.',
     description: 'Durable task set changed; clients refetch global task and Session-active catalogs.',
     parameters: [],
+  },
+  {
+    name: 'sdk-extensions/notify',
+    mode: 'emit',
+    signature: '\'sdk-extensions/notify\'(method: string, params: Record<string, unknown>): void',
+    summary: 'Forward a plugin-contributed notification to the SDK client.',
+    description: 'Forward a plugin-contributed notification to the SDK client.',
+    parameters: [{ name: 'method', description: 'JSON-RPC notification method name.' }, { name: 'params', description: 'notification params.' }],
+  },
+  {
+    name: 'sdk-extensions/resolve',
+    mode: 'bail',
+    signature: '\'sdk-extensions/resolve\'(method: string): SdkExtensionHandler | undefined',
+    summary: 'Claim a JSON-RPC method this server\'s own surface does not implement.',
+    description: 'Claim a JSON-RPC method this server\'s own surface does not implement.',
+    parameters: [{ name: 'method', description: 'JSON-RPC request method name.' }],
   },
   {
     name: 'session-telemetry/record',
@@ -4691,7 +4727,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'AccountView',
-    declaration: 'export interface AccountView {\n    readonly status: \'signed-out\' | \'credential-stored\';\n    readonly links: AccountLinks;\n    readonly attempt: SignInAttemptView | null;\n}',
+    declaration: 'export interface AccountView {\n    readonly status: \'signed-out\' | \'credential-stored\';\n    readonly links: AccountLinks;\n    readonly attempt: SignInAttemptView | null;\n    readonly restartRequired?: true;\n}',
   },
   {
     name: 'AccountWallet',
@@ -6319,7 +6355,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'OnboardingPage',
-    declaration: 'export type OnboardingPage = \'onboarding_welcome\' | \'onboarding_recharge\' | \'onboarding_use_case\' | \'onboarding_process\';',
+    declaration: 'export type OnboardingPage = \'onboarding_welcome\' | \'onboarding_use_case\' | \'onboarding_process\';',
   },
   {
     name: 'OneShotScheduleRecord',
@@ -6507,7 +6543,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ProductEventMap',
-    declaration: 'export interface ProductEventMap {\n    desktop_app_launch: Record<string, never>;\n    auth_page_view: Record<string, never>;\n    auth_page_click: {\n        button_name: \'sign_in\' | \'api-key\';\n    };\n    api_key_save_click: Record<string, never>;\n    onboarding_page_view: {\n        page_name: OnboardingPage;\n    };\n    onboarding_page_click: {\n        page_name: OnboardingPage;\n        button_name: \'next\' | \'back\' | \'skip\' | \'charge\' | \'later\' | \'continue\';\n        selected_content?: \'office\' | \'code\' | \'code_office\' | \'focus_result\' | \'key_detail\' | \'full_process\';\n    };\n    onboarding_popup_view: {\n        popup_name: \'skip_charge\' | \'skip_setting\';\n    };\n    onboarding_popup_click: {\n        popup_name: \'skip_charge\' | \'skip_setting\';\n        button_name: \'charge\' | \'know\' | \'enter\' | \'setting\' | \'close\';\n    };\n    desktop_upgrade_click: Record<string, never>;\n    desktop_upgrade_download_result: {\n        is_success: boolean;\n        error_reason?: string;\n    };\n    desktop_upgrade_install_restart_click: Record<string, never>;\n    send_button_click: {\n        session_id?: SessionId;\n        model_name?: string;\n        thinking_effort?: string;\n        run_mode: \'plan\' | \'goal\' | \'default\';\n        msg_type: \'default\' | \'steer\' | \'queue\';\n    };\n    model_switch: {\n        session_id?: SessionId;\n        switch_from: string;\n        switch_to: string;\n    };\n    thinking_level_switch: {\n        session_id?: SessionId;\n        switch_from: string;\n        switch_to: str /* …truncated — full shape in source */',
+    declaration: 'export interface ProductEventMap {\n    desktop_app_launch: Record<string, never>;\n    auth_page_view: Record<string, never>;\n    auth_page_click: {\n        button_name: \'sign_in\' | \'api-key\';\n    };\n    api_key_save_click: Record<string, never>;\n    onboarding_page_view: {\n        page_name: OnboardingPage;\n    };\n    onboarding_page_click: {\n        page_name: OnboardingPage;\n        button_name: \'next\' | \'back\' | \'skip\';\n        selected_content?: \'office\' | \'code\' | \'code_office\' | \'focus_result\' | \'key_detail\' | \'full_process\';\n    };\n    onboarding_popup_view: {\n        popup_name: \'skip_setting\';\n    };\n    onboarding_popup_click: {\n        popup_name: \'skip_setting\';\n        button_name: \'enter\' | \'setting\' | \'close\';\n    };\n    desktop_upgrade_click: Record<string, never>;\n    desktop_upgrade_download_result: {\n        is_success: boolean;\n        error_reason?: string;\n    };\n    desktop_upgrade_install_restart_click: Record<string, never>;\n    send_button_click: {\n        session_id?: SessionId;\n        model_name?: string;\n        thinking_effort?: string;\n        run_mode: \'plan\' | \'goal\' | \'default\';\n        msg_type: \'default\' | \'steer\' | \'queue\';\n    };\n    model_switch: {\n        session_id?: SessionId;\n        switch_from: string;\n        switch_to: string;\n    };\n    thinking_level_switch: {\n        session_id?: SessionId;\n        switch_from: string;\n        switch_to: string;\n        model_name: string;\n    };\n    context_compression: {\n        session_id: /* …truncated — full shape in source */',
   },
   {
     name: 'ProductTelemetryRecord',
@@ -6952,6 +6988,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ScopeKey',
     declaration: 'export type ScopeKey = object;',
+  },
+  {
+    name: 'SdkExtensionHandler',
+    declaration: 'export type SdkExtensionHandler = (params: Record<string, unknown>, signal: AbortSignal) => unknown | Promise<unknown>;',
   },
   {
     name: 'SearchFileMatches',
@@ -8315,7 +8355,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ToolRuntime',
-    declaration: 'export class ToolRuntime extends Service {\n    static inject;\n    static Config: z<Config>;\n    readonly [TOOL_RUNTIME_SCHEDULER]: ToolRuntimeScheduler;\n    constructor(ctx: Context, config: Config = {});\n    presentAs(mode: ToolPresentationMode): () => void;\n    register(definition: ToolDefinition): () => void;\n    restrict(filter: ToolRestriction): () => void;\n    guard(guard: ToolGuard): () => void;\n    get(name: string, scope?: ScopeKey): ToolDefinition | undefined;\n    schemas(scope?: ScopeKey): ToolSchema[];\n    executionMode(exec: ToolExecutionInput): ToolExecutionMode;\n    async execute(exec: ToolExecutionInput): Promise<ToolExecutionResult>;\n}',
+    declaration: 'export class ToolRuntime extends Service {\n    static inject;\n    static Config: z<Config>;\n    readonly [TOOL_RUNTIME_SCHEDULER]: ToolRuntimeScheduler;\n    constructor(ctx: Context, config: Config = {});\n    presentAs(mode: ToolPresentationMode): () => void;\n    register(definition: ToolDefinition): () => void;\n    ownerOf(name: string): RegistrationOwner | undefined;\n    restrict(filter: ToolRestriction): () => void;\n    guard(guard: ToolGuard): () => void;\n    get(name: string, scope?: ScopeKey): ToolDefinition | undefined;\n    schemas(scope?: ScopeKey): ToolSchema[];\n    executionMode(exec: ToolExecutionInput): ToolExecutionMode;\n    async execute(exec: ToolExecutionInput): Promise<ToolExecutionResult>;\n}',
   },
   {
     name: 'ToolRuntimeScheduler',

@@ -4,12 +4,14 @@
  */
 
 import { Context } from '@deepseek-ai/cordis'
+import type { Fiber } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/cordis-plugin-loader'
 import { randomUUID } from '@deepseek-ai/dsh-util-crypto'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { AttachmentError, admitEncodedImages } from '@deepseek-ai/dsh-attachment'
 import type { EncodedImageAttachment, FileAttachmentRef, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment/types'
 import type { FileBlock, ImageBlock } from '@deepseek-ai/dsh-llm'
-import { NamedEntries, ScopedLayers } from '@deepseek-ai/dsh-scope'
+import { NamedEntries, NamedOwners, ScopedLayers } from '@deepseek-ai/dsh-scope'
 import type { ScopeKey, ScopeLayer } from '@deepseek-ai/dsh-scope'
 import { SessionSeq } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent, SessionEventMap } from '@deepseek-ai/dsh-session'
@@ -255,6 +257,38 @@ function normalizeResult(command: string, value: unknown): CommandResult {
   throw new TypeError(`command "${command}" returned unknown result kind "${String(result.kind)}"`)
 }
 
+/** The configuration row that owns a registration. */
+export interface RegistrationOwner {
+  /** Entry-tree identity, unique across the profile and stable across reloads. */
+  readonly entryId: string
+  /** Id of the owning row inside its entry tree. */
+  readonly rowId: string
+  /** Module specifier the owning entry imports. */
+  readonly moduleName: string
+}
+
+/**
+ * Follow a context's fiber ancestors to the nearest Loader entry.
+ *
+ * A definition is registered through the caller's context, which may be a
+ * scope minted under the plugin (an agent context) rather than the entry
+ * fiber itself; only entry fibers carry `entry`.
+ * @param ctx - context the registration was made through.
+ * @returns the owning entry's identity, or `undefined` outside any Loader entry.
+ */
+function registrationOwner(ctx: Context): RegistrationOwner | undefined {
+  let fiber: Fiber | undefined = ctx.fiber
+  while (fiber !== undefined) {
+    const entry = fiber.entry
+    if (entry !== undefined) {
+      return { entryId: entry.id, rowId: entry.options.id, moduleName: entry.options.name }
+    }
+    const parent: Fiber = fiber.parent.fiber
+    fiber = parent === fiber ? undefined : parent
+  }
+  return undefined
+}
+
 /**
  * Human-command registry. Plain-context definitions are global; definitions
  * registered through a command-injected child of an agent context shadow
@@ -265,6 +299,8 @@ export class CommandRuntime extends TypertRemoteService {
     scope => new CommandLayer(scope),
     () => { this.notifyChange() },
   )
+  /** Owners of the live registrations per name, in registration order. */
+  private readonly registrationOwners = new NamedOwners<RegistrationOwner>()
 
   /** Monotonic per-instance counter behind {@link mintCommandId}. */
   private commandSeq = 0
@@ -284,11 +320,28 @@ export class CommandRuntime extends TypertRemoteService {
    */
   register(definition: CommandDefinition): () => void {
     const registered = normalizeDefinition(definition)
-    return this.layers.effect(
+    const name = registered.definition.name
+    const owner = registrationOwner(this.ctx)
+    const dispose = this.layers.effect(
       this.ctx,
-      layer => layer.commands.insert(registered.definition.name, registered),
+      layer => layer.commands.insert(name, registered),
       { label: 'commands.register()' },
     )
+    if (owner === undefined) return dispose
+    const untrack = this.registrationOwners.track(name, owner)
+    return () => {
+      untrack()
+      dispose()
+    }
+  }
+
+  /**
+   * Report which Loader entry registered the most recent live command named `name`.
+   * @param name - command name without the leading slash.
+   * @returns the owning entry, or `undefined` for an unknown command or one registered outside a Loader entry.
+   */
+  ownerOf(name: string): RegistrationOwner | undefined {
+    return this.registrationOwners.latest(name)
   }
 
   /**

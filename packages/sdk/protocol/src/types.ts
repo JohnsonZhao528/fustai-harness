@@ -24,6 +24,16 @@ export interface InitializeParams {
   reasoningEffort?: ReasoningEffortId
   /** Optional positive output-token cap inherited by SDK-created agents and their in-process descendants. */
   maxTokens?: number
+  /** Opt into `approval/request` host calls; absent leaves approval to in-process answerers. */
+  approvalRequests?: boolean
+  /** Optional client capabilities beyond the always-available request set. */
+  capabilities?: SdkClientCapabilities
+}
+
+/** Client capabilities negotiated during initialization. */
+export interface SdkClientCapabilities {
+  /** Answer `user-question/ask` host calls; absent leaves questions to in-process answerers. */
+  userQuestions?: boolean
 }
 
 /** Wire-stable server identity returned by initialization. */
@@ -38,6 +48,17 @@ export interface SessionPromptParams {
   sessionId: string
   /** The prompt content blocks, sent verbatim as the user message. */
   contentBlocks: SdkPromptContentBlock[]
+  /**
+   * The client's IANA time zone, recorded on the user message for time-aware
+   * request context. A value that is not a canonical zone is dropped.
+   */
+  clientTimeZone?: string
+  /**
+   * Delivery for this prompt. `followup` queues a turn after the current one;
+   * `steer` hands the message to the running turn at its next step boundary,
+   * and an idle session still starts a turn.
+   */
+  mode?: 'followup' | 'steer'
 }
 
 /** Inline raster input admitted into the runtime's durable attachment store. */
@@ -56,6 +77,11 @@ export type SdkPromptContentBlock = ContentBlock | SdkEncodedImageBlock
 export interface SessionPromptResult {
   /** Identity of the queued user message. */
   messageId: string
+  /**
+   * Delivery the message received: `step` joined the running turn at its next
+   * step boundary, `turn` was queued as a turn of its own.
+   */
+  delivery: 'step' | 'turn'
 }
 
 /** Restore a persisted session without enqueueing a prompt. */

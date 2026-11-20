@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Use `dsh-atomic-write` to replace a file without exposing partial content or following a symlinked temporary path. Its writer lock serializes read-modify-write cycles across processes so concurrent writers cannot overwrite one another with stale state. Each replacement uses caller-selected permission bits on a fresh inode, which safely narrows an existing file's permissions. This zero-dependency library accepts strings and binary byte arrays; it does not provide a `cordis.yml` plugin or crash durability because it does not call `fsync`.
+Use `dsh-atomic-write` to replace a file without exposing partial content or following a symlinked temporary path, and to publish a complete file under a name that must still be free. Its writer lock serializes read-modify-write cycles across processes so concurrent writers cannot overwrite one another with stale state. Each replacement uses caller-selected permission bits on a fresh inode, which safely narrows an existing file's permissions. This zero-dependency library accepts strings and binary byte arrays; it does not provide a `cordis.yml` plugin or crash durability because it does not call `fsync`.
 
 ## Table of Contents
 
@@ -37,6 +37,20 @@ await writeFileAtomic('/home/u/.dsh/cordis.patch.yml', text, { mode: 0o600 })
 ```
 
 Parent directories are created as needed, and readers observe either the old or the new complete content. On Windows, transient replacement interference reported as `EACCES`, `EBUSY`, or `EPERM` is retried for a bounded interval; any remaining failure removes the temporary file and leaves the target untouched.
+
+### Publishing a file under a free name
+
+Use `linkOrCopyExclusive` when an existing complete file must appear under a name that must not exist yet — publishing a materialized session log, or storing a blob a concurrent writer may already have placed:
+
+```ts
+import { linkOrCopyExclusive } from '@deepseek-ai/dsh-atomic-write'
+
+declare const stagingPath: string
+declare const finalPath: string
+await linkOrCopyExclusive(stagingPath, finalPath)
+```
+
+The fast path is `link()`: one inode under two names, and `EEXIST` for an occupied name. Where the host refuses a hard link — Android app storage denies it under SELinux, and a target on another device reports `EXDEV` — the source is copied to a random-suffix sibling and renamed into place, so no reader observes a partial file at the published name. That copy is a separate inode, so a caller that keeps writing through the source must not rely on the published name following those writes. Every other `link()` failure, an occupied name included, stays the caller's own outcome.
 
 ### Coordinating writers
 
@@ -76,7 +90,7 @@ The package is built on one separation: the atomic commit owns the swap, and the
 
 | File | Role |
 |---|---|
-| [`src/index.ts`](src/index.ts) | `writeFileAtomic` and `withFileLock`, the package's whole surface |
+| [`src/index.ts`](src/index.ts) | `writeFileAtomic`, `linkOrCopyExclusive`, and `withFileLock`, the package's whole surface |
 
 ### Write path
 
@@ -123,6 +137,7 @@ These limits define where the package is not the right tool. They are current pa
 
 - **Atomic, not durable** — no `fsync` of the file or its directory, so after a crash the rename may be observed unwound. The file-backed stores here re-read and republish on boot, keeping durability the caller's policy.
 - **Callers supply complete content** — strings and `Uint8Array` (including `Buffer`) are accepted; streaming writes are unsupported.
+- **The hard-link fallback copies the whole file** — where `link()` is refused, publication costs one full copy of the source and the disk space it occupies, and the published name is an independent inode rather than a second name for the source.
 - **Some orphaned locks require operator recovery** — a lock whose record is empty or incomplete, or names a PID a live process reused, stays in place; later writers time out without deleting it. A contender that ends between creating a claim and removing the lock leaves both `<filename>.lock` and `<filename>.lock.takeover-<record hash>`, and the operator removes both.
 - **One host and one PID namespace** — the probe runs on the contender's host. Writers on several hosts sharing a network filesystem, or containers sharing a volume, can see a live holder as exited, take over its lock, and write at the same time as it.
 

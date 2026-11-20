@@ -1,8 +1,6 @@
 /** Pure view inputs for the desktop onboarding flow. */
 import type { TrackProductEvent } from '@deepseek-ai/dsh-client-product-analytics/client'
 import type { OnboardingProgress } from '../onboarding-settings.ts'
-import type { AccountSnapshot } from './AccountSection.tsx'
-import type { PlatformPages } from './platform-pages.ts'
 import type { AccountKey } from './locales.ts'
 
 /** Render state with pending choices previewed over durable Host progress. */
@@ -10,8 +8,6 @@ export interface DesktopOnboardingState {
   status: 'loading' | 'ready' | 'saving' | 'error'
   visible: boolean
   progress: OnboardingProgress
-  /** Whether positive balance was already available at first credit-page entry; pending uses ordinary actions, never persisted. */
-  creditFunded: boolean
   error: 'settings' | null
 }
 
@@ -25,9 +21,6 @@ export interface DesktopOnboardingProps {
   /** Desktop collection callback; absent when analytics is disabled. */
   track?: TrackProductEvent
   state: DesktopOnboardingState
-  account: AccountSnapshot
-  /** Desktop-only: show the shared native recharge page; absent in ordinary browsers. */
-  openPlatformPage?: PlatformPages['open']
   update(this: void, change: OnboardingChange): Promise<boolean>
   complete(this: void, reason: 'completed' | 'skipped'): Promise<boolean>
   retry(this: void): Promise<boolean>

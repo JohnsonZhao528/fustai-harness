@@ -3,20 +3,32 @@ import { randomBytes, randomUUID, createHash, timingSafeEqual } from 'node:crypt
 import type { ServerResponse } from 'node:http'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import { arch, platform, release } from 'node:os'
+import { basename, dirname, join } from 'node:path'
 import { promises as streamPromises } from 'node:stream'
 import { Context, Service } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { z } from 'zod'
 import { DeepSeekAccount, installAccountTaskCancellation, mergePlatformCookies, platformClientHeaders, platformWireLocale, type AccountBonusBatch, type AccountBonusOrderId, type AccountClientMetadata, type AccountDetails, type AccountUserId, type AccountView, type PlatformSession, type SignInAttemptId, type SignInAttemptView } from '@deepseek-ai/dsh-deepseek-account'
-import { credentialKey } from '@deepseek-ai/dsh-credentials'
+import { credentialKey, credentialRef, type CredentialRef } from '@deepseek-ai/dsh-credentials'
 import type { AuthorizationSession } from '@deepseek-ai/dsh-authorization'
+import { ACCOUNT_UID_PATTERN, accountDataRoot, DSH_ACCOUNTS_DIR_NAME, dshBaseHome, ownsHarnessHome, readAccountPointer, resolveDshHome, writeAccountPointer, type AccountPointer } from '@deepseek-ai/dsh-home-paths'
+import { CREDENTIALS_FILENAME, storeCredentialRecord } from '@deepseek-ai/dsh-credentials-local'
 import { profile, readAccountDetail, readUnnotifiedBonuses, sendBonusNotified } from './details.ts'
 import { revokeAccount, type LogoutRetryPolicy } from './logout.ts'
-import { AccountUnauthorizedError, PlatformAuthError, platformHeaders, platformOrigin, browserUrl, requestPlatform, initialization, exchange, loginOrigin } from './protocol.ts'
+import { AccountUnauthorizedError, AccountNotFoundError, PlatformAuthError, platformHeaders, platformOrigin, browserUrl, requestPlatform, initialization, exchange, loginOrigin, modelKey, requestModelKey, requestSharedCredentials, uploadSharedCredentials } from './protocol.ts'
 
 const KEY = credentialKey('deepseek-account-platform', 'default')
 const DEVICE = credentialKey('deepseek-account-platform', 'device')
-const grant = z.object({ version: z.literal(1), token: z.string().min(1), issuer: z.url() })
+/**
+ * Stored platform session. Version 2 records the account id the Platform
+ * returned, which is the id the grant is filed under in the account's own data
+ * root. Version 1 stays readable: a session signed in before per-account roots
+ * exists, and so does one from a Platform response carrying no usable id.
+ */
+const grant = z.discriminatedUnion('version', [
+  z.object({ version: z.literal(1), token: z.string().min(1), issuer: z.url() }),
+  z.object({ version: z.literal(2), token: z.string().min(1), issuer: z.url(), uid: z.string().regex(ACCOUNT_UID_PATTERN) }),
+])
 const device = z.object({ id: z.uuid() })
 
 /** Deployment-specific platform and request deadlines. */
@@ -29,6 +41,10 @@ export interface Config {
   embeddedPageDist?: string
   /** Exact HTTP(S) origin allowed to receive account tokens for inference and files. */
   inferenceOrigin?: string
+  /** Credential reference the Platform-issued inference key is stored under. */
+  modelKeyRef?: string
+  /** Endpoint stored with the shared key; empty reuses inferenceOrigin. */
+  sharedBaseUrl?: string
   /** Allow HTTP only on loopback for the development Mock. */
   allowLoopbackHttp?: boolean
   /** Map authorization and completion pages to platformOrigin for private development proxies. */
@@ -54,6 +70,8 @@ export const Config = Schema.object({
   desktopPlatform: Schema.union([Schema.const('darwin'), Schema.const('win32'), Schema.const(null)]).default(null),
   embeddedPageDist: Schema.string().default(''),
   inferenceOrigin: Schema.string().default('https://api.deepseek.com'),
+  modelKeyRef: Schema.string().default('DEEPSEEK_API_KEY'),
+  sharedBaseUrl: Schema.string().default(''),
   allowLoopbackHttp: Schema.boolean().default(false),
   rewriteBrowserOrigin: Schema.boolean().default(false),
   requestHeaders: Schema.dict(Schema.string().role('secret')).default({}),
@@ -78,6 +96,8 @@ interface Attempt {
   callback?: ServerResponse
   initialProfile?: { token: string; value: AccountDetails['profile'] }
   completionUrl?: string
+  /** Grant filed in another document; its local copy goes once begin() has confirmed the commit. */
+  grantHandoff?: boolean
 }
 
 /** The platform implementation owns login state and its opaque stored grant. */
@@ -87,6 +107,8 @@ export class PlatformAccount extends DeepSeekAccount {
   private readonly origin: string
   private readonly embeddedPageDist: string
   private readonly inferenceOrigin: string
+  private readonly sharedBaseUrl: string
+  private readonly modelKeyRef: CredentialRef
   private readonly rewriteBrowserOrigin: boolean
   private readonly platform: 'darwin' | 'win32' | null
   private readonly requestHeaders: Record<string, string>
@@ -107,6 +129,18 @@ export class PlatformAccount extends DeepSeekAccount {
   private detailsLifetime = new AbortController()
   private closed = false
   private removing: Promise<AccountView> | undefined
+  /** Startup re-issue of a missing inference key; awaited before the plugin releases its context. */
+  private modelKeyDelivery: Promise<void> | undefined
+  /** Credential the account center currently resolves to; a local key equal to it is never uploaded back. */
+  private sharedModelKey: string | undefined
+  /** In-flight shared-credential reads and uploads, awaited on dispose. */
+  private readonly keyShares = new Set<Promise<void>>()
+  /**
+   * Data root this process stores to, captured before any sign-in can rewrite the account pointer.
+   * Session, settings, and credential providers resolve the same root at startup, so the pointer
+   * takes effect for them only after a restart while this process keeps serving this directory.
+   */
+  private readonly dataRoot = resolveDshHome()
 
   /** @param ctx - Host with authorization and credentials services. @param config - deployment options. */
   constructor(ctx: Context, config: Config = {}) {
@@ -121,6 +155,16 @@ export class PlatformAccount extends DeepSeekAccount {
       throw new Error('account: inferenceOrigin must be an HTTP(S) origin without credentials, path, query or fragment')
     }
     this.inferenceOrigin = inference.origin
+    const shared = resolved.sharedBaseUrl.trim()
+    const sharedUrl = shared === '' ? undefined : new URL(shared)
+    if (sharedUrl !== undefined && (!['http:', 'https:'].includes(sharedUrl.protocol)
+      || sharedUrl.username || sharedUrl.password || sharedUrl.search || sharedUrl.hash)) {
+      throw new Error('account: sharedBaseUrl must be an HTTP(S) URL without credentials, query or fragment')
+    }
+    this.sharedBaseUrl = sharedUrl === undefined
+      ? this.inferenceOrigin
+      : `${sharedUrl.origin}${sharedUrl.pathname.replace(/\/+$/, '')}`
+    this.modelKeyRef = credentialRef(resolved.modelKeyRef)
     this.rewriteBrowserOrigin = resolved.rewriteBrowserOrigin
     this.platform = resolved.desktopPlatform
     this.requestHeaders = platformHeaders(resolved.requestHeaders)
@@ -149,6 +193,12 @@ export class PlatformAccount extends DeepSeekAccount {
       this.invalidateDetails()
       this.changed()
     })
+    ctx.on('credentials/reference-updated', (ref) => {
+      if (ref !== this.modelKeyRef) return
+      // A locally entered model key is shared with the account, so the phone and the
+      // next desktop sign-in load the same credential. The newest entry wins.
+      this.uploadLocalModelKey()
+    })
     ctx.effect(() => async () => {
       this.closed = true
       this.logoutLifetime.abort()
@@ -159,6 +209,8 @@ export class PlatformAccount extends DeepSeekAccount {
         await active.done
       }
       await this.removing
+      await this.modelKeyDelivery
+      await Promise.all(this.keyShares)
       await Promise.all(this.revocations)
       this.changed()
     }, 'account: active attempt lifetime')
@@ -170,8 +222,24 @@ export class PlatformAccount extends DeepSeekAccount {
     if (record.kind !== 'grant') throw new PlatformAuthError('storage')
     const parsed = grant.safeParse(record.payload)
     if (!parsed.success) throw new PlatformAuthError('storage')
-    if (parsed.data.issuer === this.origin) return
-    await this.ctx.credentials.deleteRecord(KEY)
+    if (parsed.data.issuer !== this.origin) {
+      await this.ctx.credentials.deleteRecord(KEY)
+      return
+    }
+    if (parsed.data.version === 2 && parsed.data.uid !== accountOfRoot()) {
+      // A copy made for another account's root before the pointer landed; this root
+      // must never act as that account.
+      await this.ctx.credentials.deleteRecord(KEY)
+      return
+    }
+    // An interrupted sign-in can leave a grant without its key; the grant re-issues one off the critical path.
+    if (await this.ctx.credentials.resolve(this.modelKeyRef) === undefined) {
+      this.modelKeyDelivery ??= this.deliverModelKeyOrReport(parsed.data.token, {})
+    } else {
+      // A key configured on this desktop seeds an account that has none yet; an account that
+      // already resolves to one becomes this device's key instead.
+      this.alignSharedModelKey(parsed.data.token)
+    }
   }
 
   override async getState(): Promise<AccountView> {
@@ -180,12 +248,15 @@ export class PlatformAccount extends DeepSeekAccount {
       throw new PlatformAuthError('storage')
     }
     const attempt = this.attempt?.view ?? null
-    return {
+    const view: AccountView = {
       status: record === undefined ? 'signed-out' : 'credential-stored',
       // Credential removal can notify watchers before sign-out finishes clearing the attempt.
       attempt: record === undefined && attempt?.phase === 'succeeded' ? null : attempt,
       links: { usageUrl: new URL('/usage', this.origin).href, topUpUrl: new URL('/top_up', this.origin).href },
     }
+    // The pointer now names another directory than the one this process stores to, so this account's
+    // sessions, settings, and credentials reach that directory only after a restart.
+    return resolveDshHome() === this.dataRoot ? view : { ...view, restartRequired: true }
   }
 
   override async getProfile(client: AccountClientMetadata): Promise<AccountDetails['profile'] | null> {
@@ -333,6 +404,8 @@ export class PlatformAccount extends DeepSeekAccount {
       const current = grant.parse(record.payload)
       if (current.token !== token || current.issuer !== this.origin) return this.getState()
       await this.ctx.credentials.deleteRecord(KEY)
+      await this.ctx.credentials.unset(this.modelKeyRef)
+      this.clearActiveAccount()
       this.ctx.emit('deepseek-account/session-expired')
       this.attempt = undefined
       this.ctx.emit('deepseek-account/signed-out')
@@ -425,11 +498,18 @@ export class PlatformAccount extends DeepSeekAccount {
     attempt.done = this.ctx.authorization.begin({
       key: KEY, signal: attempt.controller.signal,
       interaction: { notify: () => undefined, prompt: () => Promise.reject(new PlatformAuthError('protocol')) },
-    }).then((outcome) => {
+    }).then(async (outcome) => {
       this.update(attempt, { phase: outcome.status === 'authorized' ? 'succeeded' : 'cancelled' })
       if (outcome.status === 'authorized' && attempt.completionUrl !== undefined) {
         attempt.callback?.writeHead(302, { location: attempt.completionUrl, 'cache-control': 'no-store' }).end()
       } else attempt.callback?.writeHead(204, { 'cache-control': 'no-store' }).end()
+      if (outcome.status === 'authorized' && attempt.grantHandoff === true) {
+        // begin() has re-read the committed grant from the account document; the
+        // local copy may go now. A failed removal self-heals on the next boot,
+        // whose startup reconciliation drops records filed under another root.
+        try { await this.ctx.credentials.deleteRecord(KEY) }
+        catch (error) { console.error('[deepseek-account] local grant removal after root handoff failed', error) }
+      }
     }).catch((error: unknown) => {
       const code = error instanceof PlatformAuthError ? error.code : 'protocol'
       console.error('[deepseek-account] sign-in failed', { errorCode: code })
@@ -470,6 +550,8 @@ export class PlatformAccount extends DeepSeekAccount {
         if (!parsed.success) throw new PlatformAuthError('storage')
         if (parsed.data.issuer !== this.origin) throw new PlatformAuthError('protocol')
         await this.ctx.credentials.deleteRecord(KEY)
+        await this.ctx.credentials.unset(this.modelKeyRef)
+        this.clearActiveAccount()
         this.revoke(parsed.data.token, platformClientHeaders(this.platform, client))
       }
       this.attempt = undefined
@@ -598,8 +680,15 @@ export class PlatformAccount extends DeepSeekAccount {
       }
       this.update(attempt, { phase: 'committing' })
       clearTimeout(timer)
-      try { await session.commit({ kind: 'grant', payload: { version: 1, token: result.data.token, issuer: this.origin } }) }
-      catch { throw new PlatformAuthError('storage') }
+      const token = result.data.token
+      const uid = accountUidOf(attempt)
+      try {
+        await session.commit({ kind: 'grant', payload: uid === undefined
+          ? { version: 1, token, issuer: this.origin }
+          : { version: 2, token, issuer: this.origin, uid } })
+      } catch { throw new PlatformAuthError('storage') }
+      if (uid === undefined) await this.deliverModelKeyOrReport(token, attempt.clientHeaders)
+      else if (await this.activateAccountRoot(uid, token, attempt.clientHeaders)) attempt.grantHandoff = true
     } catch (error) {
       if (deadline.signal.aborted) throw new PlatformAuthError('expired')
       throw error
@@ -609,6 +698,138 @@ export class PlatformAccount extends DeepSeekAccount {
       signal.removeEventListener('abort', abort)
       // begin() settles the browser response and removes only this attempt’s route.
     }
+  }
+
+  /**
+   * Store the inference credential the Platform provisions for the signed-in account, reporting any
+   * failure without reversing the grant that was already committed.
+   * @param token - account grant used to request the key.
+   * @param headers - client identity headers for this origin.
+   */
+  private async deliverModelKeyOrReport(token: string, headers: Record<string, string>): Promise<void> {
+    if (this.closed) return
+    try {
+      const response = modelKey.safeParse(await requestModelKey(this.origin, token,
+        AbortSignal.timeout(this.requestTimeout), { ...this.requestHeaders, ...headers }))
+      if (!response.success) throw new PlatformAuthError('protocol')
+      if (new URL(response.data.base_url).origin !== this.inferenceOrigin) {
+        console.error('[deepseek-account] model key issued for another inference origin', { base_url: response.data.base_url })
+        return
+      }
+      // Mark before the write: the reference-updated listener must not upload this key back.
+      this.sharedModelKey = response.data.api_key
+      await this.ctx.credentials.set(this.modelKeyRef, response.data.api_key)
+    } catch (error) {
+      console.error('[deepseek-account] model key delivery failed', {
+        reason: error instanceof Error ? error.name : 'unknown',
+      })
+      // Delivery failing can mean the account has no key at all: align it with this device.
+      this.alignSharedModelKey(token)
+    }
+  }
+
+  /**
+   * Align this device with the credential the account resolves to: an account that already has one
+   * becomes the local key of every device, and exactly an account without one receives this
+   * device's key.
+   * @param token - account grant used for the shared-credential requests.
+   */
+  private alignSharedModelKey(token: string): void {
+    if (this.closed) return
+    const share = (async () => {
+      try {
+        const remote = modelKey.safeParse(await requestSharedCredentials(this.origin, token,
+          AbortSignal.timeout(this.requestTimeout), this.requestHeaders))
+        if (!remote.success) return
+        if (new URL(remote.data.base_url).origin !== this.inferenceOrigin) {
+          console.error('[deepseek-account] shared model key issued for another inference origin', { base_url: remote.data.base_url })
+          return
+        }
+        // Mark before the write: the reference-updated listener must not upload this key back.
+        this.sharedModelKey = remote.data.api_key
+        if ((await this.ctx.credentials.resolve(this.modelKeyRef))?.value === remote.data.api_key) return
+        await this.ctx.credentials.set(this.modelKeyRef, remote.data.api_key)
+      } catch (error) {
+        if (!(error instanceof AccountNotFoundError)) throw error
+        const local = (await this.ctx.credentials.resolve(this.modelKeyRef))?.value
+        if (local === undefined) return
+        await uploadSharedCredentials(this.origin, token, local, this.sharedBaseUrl,
+          AbortSignal.timeout(this.requestTimeout), this.requestHeaders)
+        this.sharedModelKey = local
+      }
+    })().catch((error: unknown) => {
+      console.error('[deepseek-account] model key sharing failed', { reason: error instanceof Error ? error.name : 'unknown' })
+    })
+    this.trackKeyShare(share)
+  }
+
+  /** Upload a locally entered key; the key that just arrived from the account is not sent back. */
+  private uploadLocalModelKey(): void {
+    if (this.closed) return
+    const share = (async () => {
+      const local = (await this.ctx.credentials.resolve(this.modelKeyRef))?.value
+      if (local === undefined || local === this.sharedModelKey) return
+      const stored = await this.readCurrentGrant(this.detailsLifetime)
+      if (stored === null) return
+      await uploadSharedCredentials(this.origin, stored.token, local, this.sharedBaseUrl,
+        AbortSignal.timeout(this.requestTimeout), this.requestHeaders)
+      this.sharedModelKey = local
+    })().catch((error: unknown) => {
+      console.error('[deepseek-account] model key upload failed', { reason: error instanceof Error ? error.name : 'unknown' })
+    })
+    this.trackKeyShare(share)
+  }
+
+  /** @param share - settled sharing operation to keep alive until dispose. */
+  private trackKeyShare(share: Promise<void>): void {
+    this.keyShares.add(share)
+    void share.finally(() => { this.keyShares.delete(share) })
+  }
+
+  /**
+   * File the just-committed grant under the signed-in account's data root and point
+   * the harness home at it. The pointer is written after the copy, so a failed copy
+   * leaves the session on the previous root. The model key follows the grant: on the
+   * shared home it is delivered now, in a per-account root on that root's next boot
+   * through the startup re-issue path.
+   * @param uid - account id accepted by {@link ACCOUNT_UID_PATTERN}.
+   * @param token - the grant token just committed.
+   * @param headers - client identity headers for model-key delivery on the shared home.
+   * @returns whether the grant lives in another document and the local copy still
+   *   needs removal; removal must wait until authorization's commit confirmation has
+   *   re-read the stored record, which happens after this call returns.
+   */
+  private async activateAccountRoot(uid: string, token: string, headers: Record<string, string>): Promise<boolean> {
+    const base = dshBaseHome()
+    // Compare against where this process actually stores, never against the pointer: before a
+    // restart the pointer already names the new account while this document is still the old one.
+    const runtime = this.dataRoot
+    const pointer = readAccountPointer(base)
+    const next: AccountPointer = { activeUid: uid, firstOwnerUid: pointer?.firstOwnerUid ?? uid }
+    const target = ownsHarnessHome(next, uid) ? base : accountDataRoot(base, uid)
+    if (target !== runtime) {
+      await storeCredentialRecord(join(target, CREDENTIALS_FILENAME), KEY, {
+        kind: 'grant', payload: { version: 2, token, issuer: this.origin, uid },
+      })
+    }
+    await writeAccountPointer(base, next)
+    if (target === runtime) {
+      await this.deliverModelKeyOrReport(token, headers)
+      return false
+    }
+    return true
+  }
+
+  /**
+   * Drop the active account so the next boot resolves the shared home again. The
+   * first owner's claim is kept: its data stays where it is, and a later sign-in
+   * must not hand that data to a different account.
+   */
+  private clearActiveAccount(): void {
+    const base = dshBaseHome()
+    const pointer = readAccountPointer(base)
+    if (pointer === undefined || pointer.activeUid === null) return
+    writeAccountPointer(base, { ...pointer, activeUid: null })
   }
 
   private rejectPayload(stage: string, error: z.ZodError): never {
@@ -657,4 +878,30 @@ export default PlatformAccount
 /** OS identification shared by login and credential-free identity reads. */
 function deviceOsVersion(): string {
   return `${platform()} ${release()}`
+}
+
+/**
+ * The account id usable as a per-account data root, taken from the identity the
+ * exchange response carried. An absent or unusable id keeps the version 1 grant,
+ * which lives in the shared home like every session predating per-account roots.
+ * @param attempt - the sign-in whose exchange populated the initial profile.
+ * @returns the account id, or undefined when it cannot be trusted as a path segment.
+ */
+function accountUidOf(attempt: Attempt): string | undefined {
+  const state = attempt.initialProfile?.value
+  if (state === undefined || state.status !== 'ready') return undefined
+  const id: string | null = state.value.id
+  return id !== null && ACCOUNT_UID_PATTERN.test(id) ? id : undefined
+}
+
+/**
+ * The account id owning the data root this process resolved. Decided from the root
+ * path itself, not the pointer, so a process whose `$DSH_HOME` already names an
+ * account root answers for that account.
+ * @returns the account id for a per-account root, or null for the shared home.
+ */
+function accountOfRoot(): string | null {
+  const root = resolveDshHome()
+  if (basename(dirname(root)) === DSH_ACCOUNTS_DIR_NAME) return basename(root)
+  return readAccountPointer(root)?.firstOwnerUid ?? null
 }

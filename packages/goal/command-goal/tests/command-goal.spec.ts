@@ -35,6 +35,7 @@ function stubAgent(ctx: Context, id: string): { agent: Agent; session: Session }
     followup: () => {},
     steer: () => {},
     inject(input) { this.inbox.append('next-step', input) },
+    wake() {},
     cancel() { status = 'idle' },
     runMaintenance: task => task(new AbortController().signal),
     whenIdle() { return Promise.resolve() },

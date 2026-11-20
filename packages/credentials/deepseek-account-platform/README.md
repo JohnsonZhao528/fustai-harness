@@ -67,6 +67,10 @@ inferenceOrigin defaults to `https://api.deepseek.com`. A private deployment pat
 
 At provider initialization, a valid stored grant whose issuer differs from platformOrigin is deleted locally before consumers read account state. Startup continues signed out without a remote logout request; API keys and device identity remain stored. Storage failures remain explicit, and account HTTP or response-validation failures do not delete a matching grant.
 
+A confirmed commit also activates the signed-in account's data root. The first account on a machine keeps the harness home itself, so the sessions, settings, and credentials already there stay with it; each later account resolves `<home>/accounts/<uid>`. The committed grant records the account uid, `<home>/account.json` names the active account, and the provider copies the grant into the activated root.
+
+When the activated root differs from the root this process started in, the copy in the starting root is removed only after the target write is confirmed, and provider initialization deletes any stored grant whose recorded uid belongs to another account's root. The running process keeps using its starting root, so `getState` reports `restartRequired` until the application is launched again; Desktop restarts itself on request and the Web sign-in screen asks for a manual restart.
+
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 

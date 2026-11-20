@@ -1,7 +1,8 @@
 /**
  * Global theme DOM applier: projects the resolved ThemeSnapshot onto the
  * document — `html { color-scheme }` for native UA chrome (scrollbars, form
- * controls), `body[data-ds-dark-theme]` for the token palette, the active
+ * controls), `body[data-ds-dark-theme]` for the token palette,
+ * `body[data-dsh-skin]` for the palette skin, the active
  * theme's alias-token overrides as inline CSS variables on body, the content
  * font-size axis (`--dsh-content-font-size`), the code and terminal sizes
  * (`--dsh-code-font-size`, `--dsh-terminal-font-size`), the user font lists
@@ -15,6 +16,13 @@ import type { FontRole, ThemeSnapshot } from '@deepseek-ai/dsh-client-ui-theme/c
 
 /** Body attribute selecting the dark base palette in the token stylesheets. */
 export const DARK_ATTRIBUTE = 'data-ds-dark-theme'
+
+/**
+ * Body attribute selecting the active skin in the token stylesheets. The skin
+ * sheet re-hues surfaces, text, accent, and corner radii on top of whichever
+ * base palette `data-ds-dark-theme` selects.
+ */
+export const SKIN_ATTRIBUTE = 'data-dsh-skin'
 
 /**
  * Root attribute publishing the theme source (`light`, `dark`, or `system`)
@@ -72,6 +80,7 @@ export class ThemePresenter {
     document.documentElement.setAttribute(THEME_SOURCE_ATTRIBUTE,
       snapshot.preference === 'system' ? 'system' : scheme)
     const body = document.body
+    body.setAttribute(SKIN_ATTRIBUTE, snapshot.skin)
     if (scheme === 'dark') body.setAttribute(DARK_ATTRIBUTE, '')
     else body.removeAttribute(DARK_ATTRIBUTE)
     for (const [role, name] of Object.entries(FONT_SIZE_VARIABLES)) {
@@ -100,6 +109,7 @@ export class ThemePresenter {
     document.documentElement.style.removeProperty('color-scheme')
     document.documentElement.removeAttribute(THEME_SOURCE_ATTRIBUTE)
     const body = document.body
+    body.removeAttribute(SKIN_ATTRIBUTE)
     body.removeAttribute(DARK_ATTRIBUTE)
     for (const name of Object.values(FONT_SIZE_VARIABLES)) body.style.removeProperty(name)
     for (const name of Object.values(FONT_FAMILY_VARIABLES)) body.style.removeProperty(name)

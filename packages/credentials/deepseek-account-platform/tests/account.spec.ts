@@ -9,7 +9,8 @@ import { createServer, IncomingMessage, ServerResponse } from 'node:http'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import AuthorizationService from '@deepseek-ai/dsh-authorization'
 import type { AccountClientMetadata } from '@deepseek-ai/dsh-deepseek-account'
-import { LocalCredentialProvider } from '@deepseek-ai/dsh-credentials-local'
+import { CREDENTIALS_FILENAME, LocalCredentialProvider, storeCredentialRecord } from '@deepseek-ai/dsh-credentials-local'
+import { accountDataRoot, DSH_HOME_ENV, readAccountPointer, writeAccountPointer } from '@deepseek-ai/dsh-home-paths'
 import { credentialKey, credentialRef } from '@deepseek-ai/dsh-credentials'
 import { Config, PlatformAccount } from '../src/index.ts'
 import { browserUrl, platformHeaders, platformOrigin, loginOrigin } from '../src/protocol.ts'
@@ -35,9 +36,22 @@ async function fixture(
   embeddedPageDist = '',
   desktopPlatform: 'darwin' | 'win32' | null = null,
   balanceTimeoutMs = 30_000,
+  seedDocument?: (paths: { home: string; baseHome: string; origin: string }) => Promise<void>,
+  initialShared?: { api_key: string; base_url: string },
+  sharedBaseUrl = '',
 ) {
   const home = await mkdtemp(join(tmpdir(), 'dsh-account-'))
   cleanups.push(() => rm(home, { recursive: true, force: true }))
+  // The plugin resolves per-account data roots from $DSH_HOME; every fixture gets its own
+  // harness home so sign-in, sign-out, and expiry never touch the developer's real one.
+  const baseHome = await mkdtemp(join(tmpdir(), 'dsh-home-'))
+  cleanups.push(() => rm(baseHome, { recursive: true, force: true }))
+  const previousHome = process.env[DSH_HOME_ENV]
+  process.env[DSH_HOME_ENV] = baseHome
+  cleanups.push(async () => {
+    if (previousHome === undefined) delete process.env[DSH_HOME_ENV]
+    else process.env[DSH_HOME_ENV] = previousHome
+  })
   let init: Record<string, string> = {}
   const cancellations: Array<Record<string, string>> = []
   const cancellationReceived = Promise.withResolvers<undefined>()
@@ -49,6 +63,9 @@ async function fixture(
   let count = 0
   let businessCode = 0
   let exchangeOverride: Record<string, unknown> = {}
+  let modelKeyValue: unknown = { api_key: 'sk-model-key', base_url: 'https://api.deepseek.com' }
+  let modelKeyStatus = 200
+  let modelKeyCount = 0
   let initOverride: Record<string, unknown> = {}
   let onInit = () => {}
   let origin = ''
@@ -57,6 +74,9 @@ async function fixture(
   let detailCode = 0
   let detailStatus = 200
   let profileFailed = false
+  let sharedCredential = initialShared
+  let sharedReads = 0
+  const sharedWrites: Array<Record<string, string>> = []
 
   let summaryFailed = false
   let logoutFailed = false
@@ -95,6 +115,13 @@ async function fixture(
       res.end(JSON.stringify({ code: logoutFailed ? 50000 : 0, data: { biz_code: 0, biz_data: null } }))
       return
     }
+    if (req.url === '/api/v0/credentials' && req.method === 'GET') {
+      sharedReads++
+      if (sharedCredential === undefined) { res.writeHead(404).end(); return }
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify({ code: 0, data: { biz_code: 0, biz_data: sharedCredential } }))
+      return
+    }
     if (req.method === 'GET') {
       detailRequests.push({ path: req.url!, authorization: req.headers['x-dsh-auth-token'] as string | undefined })
       const status = detailStatus
@@ -113,6 +140,13 @@ async function fixture(
       } }))
       return
     }
+    if (req.url?.endsWith('model_key')) {
+      modelKeyCount++
+      if (modelKeyStatus !== 200) { res.writeHead(modelKeyStatus).end('{}'); return }
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify({ code: 0, data: { biz_code: 0, biz_data: modelKeyValue } }))
+      return
+    }
     req.setEncoding('utf8')
     let text = ''
     for await (const chunk of req) {
@@ -121,7 +155,11 @@ async function fixture(
     }
     const body = JSON.parse(text) as Record<string, string>
     let value: unknown
-    if (req.url?.endsWith('auth_cancel')) {
+    if (req.url === '/api/v0/credentials') {
+      sharedWrites.push(body)
+      sharedCredential = { api_key: body.api_key ?? '', base_url: 'https://api.deepseek.com' }
+      value = sharedCredential
+    } else if (req.url?.endsWith('auth_cancel')) {
       cancellations.push(body)
       cancellationReceived.resolve(undefined)
       if (holdCancel) await release.promise
@@ -152,13 +190,16 @@ async function fixture(
   const web = ctx.plugin(WebServer, { host: '127.0.0.1', port: 0 })
   await web
   const callbackOrigin = `http://127.0.0.1:${ctx.webServer.port}`
+  // A seeded document must be on disk before the provider loads its snapshot;
+  // with `watch: false` an external write that arrives later stays invisible.
+  await seedDocument?.({ home, baseHome, origin })
   const credentials = ctx.plugin(LocalCredentialProvider, { path: join(home, 'credentials.yaml'), watch: false })
   await credentials
   const authorization = ctx.plugin(AuthorizationService)
   await authorization
   await beforeAccount?.(ctx, origin)
   const provider = ctx.plugin(PlatformAccount, {
-    platformOrigin: origin, inferenceOrigin, embeddedPageDist, desktopPlatform,
+    platformOrigin: origin, inferenceOrigin, embeddedPageDist, desktopPlatform, sharedBaseUrl,
     allowLoopbackHttp: true, requestHeaders, accountRequestHeaders,
     rewriteBrowserOrigin, logoutRetryDelayMs: 1, balanceTimeoutMs,
   })
@@ -172,7 +213,7 @@ async function fixture(
     throw new Error(`missing phase ${phase}`)
   }
   return { cancellations, cancellationReceived, holdCancel: () => { holdCancel = true },
-    ctx, account, home, origin, callbackOrigin, wait, receivedHeaders, logoutHeaders, logoutCount: () => logoutCount,
+    ctx, account, home, baseHome, origin, callbackOrigin, wait, receivedHeaders, logoutHeaders, logoutCount: () => logoutCount,
     holdLogout: () => { logoutHold = true },
     failLogout: (failed: boolean) => { logoutFailed = failed }, detailRequests, detailsStarted,
     detailCode: (code: number) => { detailCode = code },
@@ -190,6 +231,10 @@ async function fixture(
     onInit: (callback: () => void) => { onInit = callback },
     bonusWallets: (value: unknown) => { bonusWallets = value },
     exchangeResponse: (value: Record<string, unknown>) => { exchangeOverride = value },
+    modelKeyResponse: (value: unknown) => { modelKeyValue = value },
+    failModelKey: (status = 503) => { modelKeyStatus = status },
+    modelKeyCount: () => modelKeyCount,
+    sharedReads: () => sharedReads, sharedWrites,
     fail: (value: number) => { businessCode = value },
     init: () => init, count: () => count, callback: (state = init.state) => `${init.redirect_uri}?code=test&state=${state}` }
 }
@@ -565,11 +610,11 @@ it('adds private deployment cookies to every Platform request without exposing t
   const headers = f.receivedHeaders
   const paths = headers.map(item => item.path)
   // The profile and wallet queries are independent requests, so their arrival order is scheduler-dependent.
-  expect(paths.slice(0, 2)).toEqual(['/auth-api/v0/dsh/auth_init', '/auth-api/v0/dsh/auth_exchange'])
-  expect(paths.slice(2, -1).sort()).toEqual(['/api/v0/users/get_user_summary', '/auth-api/v0/users/current'])
+  expect(paths.slice(0, 3)).toEqual(['/auth-api/v0/dsh/auth_init', '/auth-api/v0/dsh/auth_exchange', '/auth-api/v0/dsh/model_key'])
+  expect(paths.slice(3, -1).sort()).toEqual(['/api/v0/users/get_user_summary', '/auth-api/v0/users/current'])
   expect(paths.at(-1)).toBe('/auth-api/v0/users/logout')
   expect(headers.every(item => item.cookie === 'test_gate=synthetic')).toBe(true)
-  const grantedPaths = new Set(['/auth-api/v0/users/current', '/api/v0/users/get_user_summary', '/auth-api/v0/users/logout'])
+  const grantedPaths = new Set(['/auth-api/v0/users/current', '/api/v0/users/get_user_summary', '/auth-api/v0/dsh/model_key', '/auth-api/v0/users/logout'])
   expect(headers.filter(item => grantedPaths.has(item.path ?? '')).every(item => item.authorization === 'dsh_mock_test')).toBe(true)
   expect(headers.filter(item => !grantedPaths.has(item.path ?? '')).every(item => item.authorization === undefined)).toBe(true)
 })
@@ -822,6 +867,7 @@ it('overlays account cookies without changing authorization or logout routing', 
 it('sends a development grant only to its configured inference origin', async () => {
   const f = await fixture(undefined, {}, false, {}, 'http://inference.example.test:8094')
   f.exchangeResponse({ token: 'test-account-token' })
+  f.modelKeyResponse({ api_key: 'sk-model-key', base_url: 'http://inference.example.test:8094' })
   await f.account.startSignIn(clientMetadata(), f.callbackOrigin, 'desktop')
   await f.wait('waiting-browser')
   await fetch(f.callback(), { redirect: 'manual' })
@@ -831,6 +877,51 @@ it('sends a development grant only to its configured inference origin', async ()
     'https://inference.example.test:8094/api', 'http://user@inference.example.test:8094/api']) {
     expect(await f.account.resolveToken(url)).toBeUndefined()
   }
+})
+
+it('stores the issued inference key on sign-in and removes it on sign-out', async () => {
+  const modelKey = credentialRef('DEEPSEEK_API_KEY')
+  const f = await fixture()
+  await f.account.startSignIn(clientMetadata(), f.callbackOrigin, 'desktop')
+  await f.wait('waiting-browser')
+  await fetch(f.callback(), { redirect: 'manual' })
+  await f.wait('succeeded')
+  expect((await f.ctx.credentials.resolve(modelKey))?.value).toBe('sk-model-key')
+  expect(JSON.stringify(await f.account.getState())).not.toContain('sk-model-key')
+  await f.account.signOut(clientMetadata())
+  await expect.poll(f.logoutCount).toBe(1)
+  expect(await f.ctx.credentials.resolve(modelKey)).toBeUndefined()
+})
+
+it('keeps the grant when the issued key belongs to another inference origin', async () => {
+  const modelKey = credentialRef('DEEPSEEK_API_KEY')
+  const f = await fixture()
+  f.modelKeyResponse({ api_key: 'sk-model-key', base_url: 'https://other-inference.example.test/v1' })
+  await f.account.startSignIn(clientMetadata(), f.callbackOrigin, 'desktop')
+  await f.wait('waiting-browser')
+  await fetch(f.callback(), { redirect: 'manual' })
+  await f.wait('succeeded')
+  expect(await f.ctx.credentials.resolve(modelKey)).toBeUndefined()
+  expect((await f.account.getPlatformSession())?.token).toBe('dsh_mock_test')
+})
+
+it('keeps the grant and re-issues the key at the next start when delivery fails', async () => {
+  const modelKey = credentialRef('DEEPSEEK_API_KEY')
+  const f = await fixture()
+  f.failModelKey()
+  await f.account.startSignIn(clientMetadata(), f.callbackOrigin, 'desktop')
+  await f.wait('waiting-browser')
+  await fetch(f.callback(), { redirect: 'manual' })
+  await f.wait('succeeded')
+  expect(await f.ctx.credentials.resolve(modelKey)).toBeUndefined()
+  const replay = await fixture(undefined, {}, false, {}, undefined, async (ctx, issuer) => {
+    await ctx.credentials.modifyRecord(credentialKey('deepseek-account-platform', 'default'), () => Promise.resolve({
+      kind: 'grant', payload: { version: 1, issuer, token: 'dsh_mock_test' },
+    }))
+  })
+  await expect.poll(replay.modelKeyCount).toBe(1)
+  expect((await replay.ctx.credentials.resolve(modelKey))?.value).toBe('sk-model-key')
+  expect(replay.logoutCount()).toBe(0)
 })
 
 
@@ -903,12 +994,12 @@ it.each([
   await f.account.signOut(clientMetadata())
   await expect.poll(f.logoutCount).toBe(1)
   const paths = f.receivedHeaders.map(item => item.path)
-  expect(paths.slice(0, 4)).toEqual([
+  expect(paths.slice(0, 5)).toEqual([
     '/auth-api/v0/dsh/auth_init', '/auth-api/v0/dsh/auth_cancel',
-    '/auth-api/v0/dsh/auth_init', '/auth-api/v0/dsh/auth_exchange',
+    '/auth-api/v0/dsh/auth_init', '/auth-api/v0/dsh/auth_exchange', '/auth-api/v0/dsh/model_key',
   ])
   // Profile and balance requests run concurrently.
-  expect(paths.slice(4, -1).sort()).toEqual(['/api/v0/users/get_user_summary', '/auth-api/v0/users/current'])
+  expect(paths.slice(5, -1).sort()).toEqual(['/api/v0/users/get_user_summary', '/auth-api/v0/users/current'])
   expect(paths.slice(-1)).toEqual(['/auth-api/v0/users/logout'])
   expect(f.receivedHeaders.map(item => item.clientPlatform)).toEqual(f.receivedHeaders.map(() => expected))
   for (const header of f.receivedHeaders) {
@@ -937,6 +1028,7 @@ it('keeps one login attempt on the identity captured by its own initiating call'
     ['/auth-api/v0/dsh/auth_cancel', '', 'web', '1.0.0', 'zh_CN', '28800'],
     ['/auth-api/v0/dsh/auth_init', '', 'web', '9.9.9', 'en_US', '-18000'],
     ['/auth-api/v0/dsh/auth_exchange', '', 'web', '9.9.9', 'en_US', '-18000'],
+    ['/auth-api/v0/dsh/model_key', '', 'web', '9.9.9', 'en_US', '-18000'],
   ])
 })
 
@@ -1681,4 +1773,215 @@ it('reads credential-free device identity without minting a device', async () =>
   await storeAccount(f)
   await f.account.getProfile(clientMetadata())
   expect(await f.account.getDeviceIdentity()).toEqual({ deviceId, userId: 'test-user', osVersion: expect.any(String) as string })
+})
+
+const GRANT_KEY = credentialKey('deepseek-account-platform', 'default')
+
+/** Exchange payload whose user id decides whether the grant is filed per-account. */
+const exchangeUser = (id: string | null) => ({ user: { id, email: 't***@example.invalid' } })
+
+async function signInFull(f: Awaited<ReturnType<typeof fixture>>) {
+  await f.account.startSignIn(clientMetadata(), f.callbackOrigin, 'desktop')
+  await f.wait('waiting-browser')
+  await fetch(f.callback(), { redirect: 'manual' })
+  return f.wait('succeeded')
+}
+
+it('files the first account grant in the shared home and releases the claim on sign-out', async () => {
+  const modelKey = credentialRef('DEEPSEEK_API_KEY')
+  const f = await fixture()
+  f.exchangeResponse(exchangeUser('test-user'))
+  await signInFull(f)
+  expect(readAccountPointer(f.baseHome)).toEqual({ activeUid: 'test-user', firstOwnerUid: 'test-user' })
+  expect(await f.ctx.credentials.readRecord(GRANT_KEY)).toEqual({
+    kind: 'grant', payload: { version: 2, token: 'dsh_mock_test', issuer: f.origin, uid: 'test-user' },
+  })
+  expect((await f.ctx.credentials.resolve(modelKey))?.value).toBe('sk-model-key')
+  expect(await f.account.getState()).toMatchObject({ status: 'credential-stored' })
+  expect(await f.account.getState()).not.toHaveProperty('restartRequired')
+  await f.account.signOut(clientMetadata())
+  expect(readAccountPointer(f.baseHome)).toEqual({ activeUid: null, firstOwnerUid: 'test-user' })
+  expect(await f.ctx.credentials.resolve(modelKey)).toBeUndefined()
+  // A later session under the same first owner clears an already-inactive pointer without
+  // touching the claim.
+  await storeAccount(f)
+  await f.account.signOut(clientMetadata())
+  expect(readAccountPointer(f.baseHome)).toEqual({ activeUid: null, firstOwnerUid: 'test-user' })
+})
+
+it('files a second account grant in its own data root and removes it from the shared home', async () => {
+  const f = await fixture(undefined, {}, false, {}, undefined, undefined, undefined, undefined, undefined,
+    async ({ baseHome }) => { writeAccountPointer(baseHome, { activeUid: null, firstOwnerUid: 'alice' }) })
+  f.exchangeResponse(exchangeUser('bob-2'))
+  await f.account.startSignIn(clientMetadata(), f.callbackOrigin, 'desktop')
+  await f.wait('waiting-browser')
+  await fetch(f.callback(), { redirect: 'manual' })
+  // The local copy goes only after begin() has confirmed the commit by re-reading the
+  // record, so its removal is the observable end of the handoff.
+  await expect.poll(async () => await f.ctx.credentials.readRecord(GRANT_KEY)).toBeUndefined()
+  expect(readAccountPointer(f.baseHome)).toEqual({ activeUid: 'bob-2', firstOwnerUid: 'alice' })
+  const stored = await readFile(join(accountDataRoot(f.baseHome, 'bob-2'), CREDENTIALS_FILENAME), 'utf8')
+  expect(stored).toContain('dsh_mock_test')
+  expect(stored).toContain('bob-2')
+  expect(await f.account.getState()).toMatchObject({ status: 'signed-out', attempt: null, restartRequired: true })
+  expect(f.modelKeyCount()).toBe(0)
+})
+
+it.each([{ id: null }, { id: 'bad id!' }])('keeps a grant for user id $id in the shared home without a pointer', async ({ id }) => {
+  const modelKey = credentialRef('DEEPSEEK_API_KEY')
+  const f = await fixture()
+  f.exchangeResponse(exchangeUser(id))
+  await signInFull(f)
+  expect(readAccountPointer(f.baseHome)).toBeUndefined()
+  expect(await f.ctx.credentials.readRecord(GRANT_KEY)).toMatchObject({ kind: 'grant', payload: { version: 1 } })
+  expect((await f.ctx.credentials.resolve(modelKey))?.value).toBe('sk-model-key')
+})
+
+it('drops a boot grant whose account does not own this data root', async () => {
+  const f = await fixture(undefined, {}, false, {}, undefined, undefined, undefined, undefined, undefined,
+    ({ home, origin }) => storeCredentialRecord(join(home, 'credentials.yaml'), GRANT_KEY, {
+      kind: 'grant', payload: { version: 2, token: 'ghost-token', issuer: origin, uid: 'ghost' },
+    }))
+  expect((await f.account.getState()).status).toBe('signed-out')
+  expect(await f.ctx.credentials.readRecord(GRANT_KEY)).toBeUndefined()
+  expect(f.modelKeyCount()).toBe(0)
+})
+
+it('keeps a boot grant whose account owns this data root and re-issues the missing model key', async () => {
+  const modelKey = credentialRef('DEEPSEEK_API_KEY')
+  const f = await fixture(undefined, {}, false, {}, undefined, undefined, undefined, undefined, undefined,
+    async ({ home, baseHome, origin }) => {
+      await writeAccountPointer(baseHome, { activeUid: 'test-user', firstOwnerUid: 'test-user' })
+      await storeCredentialRecord(join(home, 'credentials.yaml'), GRANT_KEY, {
+        kind: 'grant', payload: { version: 2, token: 'owned-token', issuer: origin, uid: 'test-user' },
+      })
+    })
+  expect((await f.account.getState()).status).toBe('credential-stored')
+  expect(await f.ctx.credentials.readRecord(GRANT_KEY)).toBeDefined()
+  await expect.poll(f.modelKeyCount).toBe(1)
+  expect((await f.ctx.credentials.resolve(modelKey))?.value).toBe('sk-model-key')
+})
+
+it('uploads a key configured on this desktop to an account that has none', async () => {
+  const modelKey = credentialRef('DEEPSEEK_API_KEY')
+  const f = await fixture(undefined, {}, false, {}, undefined, async (ctx, issuer) => {
+    await ctx.credentials.modifyRecord(GRANT_KEY, () => Promise.resolve({
+      kind: 'grant', payload: { version: 1, issuer, token: 'dsh_mock_test' },
+    }))
+    await ctx.credentials.set(modelKey, 'sk-desktop-key')
+  })
+  await expect.poll(() => f.sharedWrites.length).toBe(1)
+  expect(f.sharedWrites[0]).toEqual({ api_key: 'sk-desktop-key', base_url: 'https://api.deepseek.com' })
+  expect((await f.ctx.credentials.resolve(modelKey))?.value).toBe('sk-desktop-key')
+  expect(f.modelKeyCount()).toBe(0)
+})
+
+it('uploads the configured shared base URL with the key it belongs to', async () => {
+  const modelKey = credentialRef('DEEPSEEK_API_KEY')
+  const f = await fixture(undefined, {}, false, {}, 'https://maas.example.test', async (ctx, issuer) => {
+    await ctx.credentials.modifyRecord(GRANT_KEY, () => Promise.resolve({
+      kind: 'grant', payload: { version: 1, issuer, token: 'dsh_mock_test' },
+    }))
+    await ctx.credentials.set(modelKey, 'sk-desktop-key')
+  }, '', null, 30_000, undefined, undefined, 'https://maas.example.test/compatible-mode/v1/')
+  await expect.poll(() => f.sharedWrites.length).toBe(1)
+  expect(f.sharedWrites[0]).toEqual({
+    api_key: 'sk-desktop-key', base_url: 'https://maas.example.test/compatible-mode/v1',
+  })
+})
+
+it('adopts the account credential over a key already configured on this desktop', async () => {
+  const modelKey = credentialRef('DEEPSEEK_API_KEY')
+  const f = await fixture(undefined, {}, false, {}, undefined, async (ctx, issuer) => {
+    await ctx.credentials.modifyRecord(GRANT_KEY, () => Promise.resolve({
+      kind: 'grant', payload: { version: 1, issuer, token: 'dsh_mock_test' },
+    }))
+    await ctx.credentials.set(modelKey, 'sk-desktop-key')
+  }, '', null, 30_000, undefined, { api_key: 'sk-account-key', base_url: 'https://api.deepseek.com' })
+  await expect.poll(async () => (await f.ctx.credentials.resolve(modelKey))?.value).toBe('sk-account-key')
+  expect(f.sharedWrites).toEqual([])
+  expect(f.modelKeyCount()).toBe(0)
+})
+
+it('uploads a replacement model key whenever the local credential changes', async () => {
+  const modelKey = credentialRef('DEEPSEEK_API_KEY')
+  const f = await fixture(undefined, {}, false, {}, undefined, async (ctx, issuer) => {
+    await ctx.credentials.modifyRecord(GRANT_KEY, () => Promise.resolve({
+      kind: 'grant', payload: { version: 1, issuer, token: 'dsh_mock_test' },
+    }))
+  })
+  await expect.poll(f.modelKeyCount).toBe(1)
+  expect((await f.ctx.credentials.resolve(modelKey))?.value).toBe('sk-model-key')
+  expect(f.sharedWrites).toEqual([])
+  await f.ctx.credentials.set(modelKey, 'sk-replaced-key')
+  await expect.poll(() => f.sharedWrites.length).toBe(1)
+  expect(f.sharedWrites[0]).toEqual({ api_key: 'sk-replaced-key', base_url: 'https://api.deepseek.com' })
+})
+
+it('keeps the local grant copy when its removal after a root handoff fails', async () => {
+  const f = await fixture(undefined, {}, false, {}, undefined, undefined, undefined, undefined, undefined,
+    async ({ baseHome }) => { writeAccountPointer(baseHome, { activeUid: null, firstOwnerUid: 'alice' }) })
+  const remove = vi.spyOn(f.ctx.credentials, 'deleteRecord').mockRejectedValue(new Error('locked'))
+  cleanups.push(async () => { remove.mockRestore() })
+  f.exchangeResponse(exchangeUser('bob-2'))
+  await signInFull(f)
+  await expect.poll(() => remove.mock.calls.length).toBe(1)
+  expect(readAccountPointer(f.baseHome)).toEqual({ activeUid: 'bob-2', firstOwnerUid: 'alice' })
+  const stored = await readFile(join(accountDataRoot(f.baseHome, 'bob-2'), CREDENTIALS_FILENAME), 'utf8')
+  expect(stored).toContain('dsh_mock_test')
+  expect(await f.ctx.credentials.readRecord(GRANT_KEY)).toBeDefined()
+  expect(await f.account.getState()).toMatchObject({ status: 'credential-stored', attempt: { phase: 'succeeded' } })
+  expect(f.modelKeyCount()).toBe(0)
+})
+
+it('keeps the session when the model key response omits the key fields', async () => {
+  const modelKey = credentialRef('DEEPSEEK_API_KEY')
+  const f = await fixture()
+  f.modelKeyResponse({ unexpected: true })
+  await signInFull(f)
+  expect((await f.account.getState()).status).toBe('credential-stored')
+  expect(await f.ctx.credentials.resolve(modelKey)).toBeUndefined()
+  expect(f.modelKeyCount()).toBe(1)
+})
+
+it('keeps the session when storing the delivered model key fails with a non-Error rejection', async () => {
+  const modelKey = credentialRef('DEEPSEEK_API_KEY')
+  const f = await fixture()
+  const write = vi.spyOn(f.ctx.credentials, 'set').mockRejectedValue('offline')
+  cleanups.push(async () => { write.mockRestore() })
+  await signInFull(f)
+  expect((await f.account.getState()).status).toBe('credential-stored')
+  expect(await f.ctx.credentials.resolve(modelKey)).toBeUndefined()
+  expect(f.modelKeyCount()).toBe(1)
+})
+
+it('keeps a boot grant whose account is the active owner of a per-account data root', async () => {
+  const modelKey = credentialRef('DEEPSEEK_API_KEY')
+  const f = await fixture(undefined, {}, false, {}, undefined, undefined, undefined, undefined, undefined,
+    async ({ home, baseHome, origin }) => {
+      await writeAccountPointer(baseHome, { activeUid: 'test-user', firstOwnerUid: 'alice' })
+      await storeCredentialRecord(join(home, 'credentials.yaml'), GRANT_KEY, {
+        kind: 'grant', payload: { version: 2, token: 'root-token', issuer: origin, uid: 'test-user' },
+      })
+    })
+  expect((await f.account.getState()).status).toBe('credential-stored')
+  expect(await f.ctx.credentials.readRecord(GRANT_KEY)).toBeDefined()
+  await expect.poll(async () => (await f.ctx.credentials.resolve(modelKey))?.value).toBe('sk-model-key')
+  expect(f.modelKeyCount()).toBe(1)
+})
+
+it('skips the boot model key re-issue when the key is already configured', async () => {
+  const modelKey = credentialRef('DEEPSEEK_API_KEY')
+  const f = await fixture(undefined, {}, false, {}, undefined, async (ctx) => {
+    await ctx.credentials.set(modelKey, 'sk-existing')
+  }, undefined, undefined, undefined, async ({ home, baseHome, origin }) => {
+    await writeAccountPointer(baseHome, { activeUid: 'test-user', firstOwnerUid: 'test-user' })
+    await storeCredentialRecord(join(home, 'credentials.yaml'), GRANT_KEY, {
+      kind: 'grant', payload: { version: 2, token: 'owned-token', issuer: origin, uid: 'test-user' },
+    })
+  })
+  await f.account.getProfile(clientMetadata())
+  expect((await f.account.getState()).status).toBe('credential-stored')
+  expect(f.modelKeyCount()).toBe(0)
+  expect((await f.ctx.credentials.resolve(modelKey))?.value).toBe('sk-existing')
 })

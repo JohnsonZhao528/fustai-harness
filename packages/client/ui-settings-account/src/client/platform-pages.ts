@@ -1,14 +1,13 @@
 /**
  * One native Platform view for the whole account feature. The Account settings
- * page, the frame-wide quota notice, and the desktop onboarding recharge step
- * request a page here instead of mounting their own container, because the
+ * page requests a page here instead of mounting its own container, because the
  * Desktop host owns a single WebContentsView and its `open` destroys whatever
  * was showing before.
  */
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 
 /** Platform destinations the shared native host can show. */
-export type PlatformPage = 'usage' | 'top-up'
+export type PlatformPage = 'usage'
 
 /** The live request the shared host renders. */
 export interface PlatformPageClaim {

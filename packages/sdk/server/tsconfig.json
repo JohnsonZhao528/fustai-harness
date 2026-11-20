@@ -36,7 +36,16 @@
       "path": "../../subagent/subagent"
     },
     {
+      "path": "../../interaction/user-approval"
+    },
+    {
+      "path": "../../interaction/user-questions"
+    },
+    {
       "path": "../../session/working-directory"
+    },
+    {
+      "path": "../../util/time"
     }
   ]
 }

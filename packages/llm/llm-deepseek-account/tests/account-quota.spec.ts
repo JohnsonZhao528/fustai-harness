@@ -66,7 +66,8 @@ it('reports an in-band account balance stream error as ACCOUNT_QUOTA', async () 
   })
 })
 
-it('still expires the stored credential on an account-route 401', async () => {
+/** Mount the route with a spy on the credential removal it may report. */
+async function routeWithRejectSpy(): Promise<{ ctx: Context, rejectToken: ReturnType<typeof vi.fn> }> {
   const ctx = new Context()
   contexts.push(ctx)
   await ctx.plugin(LlmRuntime)
@@ -76,9 +77,29 @@ it('still expires the stored credential on an account-route 401', async () => {
     rejectToken: (token: string): Promise<void> => rejectToken(token),
   } as DeepSeekAccount)
   await ctx.plugin(Account)
+  return { ctx, rejectToken }
+}
+
+it('still expires the stored credential on an account-route 401', async () => {
+  const { ctx, rejectToken } = await routeWithRejectSpy()
   vi.spyOn(globalThis, 'fetch').mockImplementation(messagesOnly(() => new Response('Unauthorized', { status: 401 })))
   await expect(finishOf(ctx, 'deepseek-account')).resolves.toMatchObject({
     kind: 'error', failure: { code: 'ACCOUNT_TOKEN_INVALID' },
   })
   expect(rejectToken.mock.calls).toEqual([['account-token']])
+})
+
+it.each([403, 503])('keeps the stored credential after an account-route HTTP %s', async (status) => {
+  const { ctx, rejectToken } = await routeWithRejectSpy()
+  vi.spyOn(globalThis, 'fetch').mockImplementation(messagesOnly(() => new Response('Unavailable', { status })))
+  const finish = await finishOf(ctx, 'deepseek-account')
+  expect(finish).toMatchObject({ kind: 'error' })
+  expect(rejectToken).not.toHaveBeenCalled()
+})
+
+it('keeps the stored credential when the account route cannot reach the endpoint', async () => {
+  const { ctx, rejectToken } = await routeWithRejectSpy()
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async () => { throw new TypeError('offline') })
+  await expect(finishOf(ctx, 'deepseek-account')).resolves.toMatchObject({ kind: 'error' })
+  expect(rejectToken).not.toHaveBeenCalled()
 })

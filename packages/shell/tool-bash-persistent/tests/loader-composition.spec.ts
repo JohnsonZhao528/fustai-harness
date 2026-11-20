@@ -55,6 +55,7 @@ async function agent(ctx: Context, cwd: string): Promise<Agent> {
     followup: () => {},
     steer: () => ({ outcome: Promise.resolve({ status: 'rejected' as const }) }),
     inject: () => {},
+    wake: () => {},
     cancel() {},
     runMaintenance: task => task(new AbortController().signal),
     whenIdle: () => Promise.resolve(),

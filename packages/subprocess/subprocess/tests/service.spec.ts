@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { PassThrough } from 'node:stream'
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
+import { DSH_ACCOUNTS_DIR_NAME, DSH_HOME_ENV, writeAccountPointer } from '@deepseek-ai/dsh-home-paths'
 import { scrubbedParentEnv, SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import type {
   SubprocessHandle,
@@ -98,6 +102,30 @@ describe('SubprocessRuntime seam', () => {
       delete process.env.SCRUB_PROBE_TOKEN
       delete process.env.SCRUB_PROBE_PASSWORD
       delete process.env.SCRUB_PROBE_PLAIN
+    }
+  })
+})
+
+describe('scrubbedParentEnv data root', () => {
+  it('forwards the data root this process booted with, unchanged after another account becomes active', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'dsh-child-home-'))
+    const launchHome = process.env.DSH_HOME
+    const first = join(base, DSH_ACCOUNTS_DIR_NAME, 'acct-1')
+    writeAccountPointer(base, { activeUid: 'acct-1', firstOwnerUid: 'acct-0' })
+    mkdirSync(first, { recursive: true, mode: 0o700 })
+    process.env.DSH_HOME = base
+    try {
+      vi.resetModules()
+      const fresh = await import('@deepseek-ai/dsh-subprocess')
+      expect(fresh.scrubbedParentEnv()[DSH_HOME_ENV]).toBe(first)
+      // The running process keeps its own root until restart, so its children do too.
+      writeAccountPointer(base, { activeUid: 'acct-2', firstOwnerUid: 'acct-0' })
+      expect(fresh.scrubbedParentEnv()[DSH_HOME_ENV]).toBe(first)
+    } finally {
+      if (launchHome === undefined) delete process.env.DSH_HOME
+      else process.env.DSH_HOME = launchHome
+      rmSync(base, { recursive: true, force: true, maxRetries: 4 })
+      vi.resetModules()
     }
   })
 })

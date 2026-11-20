@@ -3,16 +3,17 @@
 import { runInNewContext } from 'node:vm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { bootThemeInjections } from '../src/boot-theme.ts'
-import type { FontSizes, ThemePreference } from '../src/theme-settings.ts'
+import type { FontSizes, ThemePreference, ThemeSkin } from '../src/theme-settings.ts'
 
 const DARK_ATTRIBUTE = 'data-ds-dark-theme'
+const SKIN_ATTRIBUTE = 'data-dsh-skin'
 
 function mockSystemDark(matches: boolean): void {
   vi.stubGlobal('matchMedia', vi.fn(() => ({ matches }) as MediaQueryList))
 }
 
-function executeBootstrap(preference?: ThemePreference, fontSizes?: FontSizes): void {
-  for (const row of bootThemeInjections(preference, fontSizes)) {
+function executeBootstrap(preference?: ThemePreference, skin?: ThemeSkin, fontSizes?: FontSizes): void {
+  for (const row of bootThemeInjections(preference, skin, fontSizes)) {
     if (row.kind === 'script') runInNewContext(row.text, { document, matchMedia: globalThis.matchMedia })
   }
 }
@@ -22,6 +23,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
   delete document.documentElement.dataset.dsThemeSource
   document.body.removeAttribute(DARK_ATTRIBUTE)
+  document.body.removeAttribute(SKIN_ATTRIBUTE)
   for (const name of ['--dsh-content-font-size', '--dsh-code-font-size', '--dsh-terminal-font-size']) document.body.style.removeProperty(name)
   for (const kind of ['text', 'code', 'terminal']) document.body.style.removeProperty(`--dsh-font-family-${kind}`)
 })
@@ -33,12 +35,14 @@ describe('theme bootstrap row', () => {
     expect(head).toMatchObject({ kind: 'style' })
     expect(body).toMatchObject({ kind: 'script', placement: 'body' })
     if (head?.kind !== 'style') throw new Error('theme head bootstrap row is not a style')
-    expect(head.text).toBe(':root{color-scheme:dark}body{background-color:#151517;--dsh-boot-bg:#151517}')
+    expect(head.text).toBe(':root{color-scheme:dark}body{background-color:#121310;--dsh-boot-bg:#121310}')
     expect(document.body.hasAttribute(DARK_ATTRIBUTE)).toBe(false)
+    expect(document.body.hasAttribute(SKIN_ATTRIBUTE)).toBe(false)
     if (body?.kind !== 'script') throw new Error('theme body bootstrap row is not a script')
     runInNewContext(body.text, { document, matchMedia: globalThis.matchMedia })
     expect(document.documentElement.dataset.dsThemeSource).toBe('dark')
     expect(document.body.hasAttribute(DARK_ATTRIBUTE)).toBe(true)
+    expect(document.body.getAttribute(SKIN_ATTRIBUTE)).toBe('a')
   })
 
   it('lets durable light override a dark OS and clears stale dark state', () => {
@@ -46,7 +50,7 @@ describe('theme bootstrap row', () => {
     mockSystemDark(true)
     const [head] = bootThemeInjections('light')
     if (head?.kind !== 'style') throw new Error('theme head bootstrap row is not a style')
-    expect(head.text).toBe(':root{color-scheme:light}body{background-color:#fff;--dsh-boot-bg:#fff}')
+    expect(head.text).toBe(':root{color-scheme:light}body{background-color:#f5f3ed;--dsh-boot-bg:#f5f3ed}')
     executeBootstrap('light')
     expect(document.body.hasAttribute(DARK_ATTRIBUTE)).toBe(false)
   })
@@ -65,9 +69,20 @@ describe('theme bootstrap row', () => {
     const [head] = bootThemeInjections('system')
     if (head?.kind !== 'style') throw new Error('theme head bootstrap row is not a style')
     expect(head.text).toBe(
-      ':root{color-scheme:light}body{background-color:#fff;--dsh-boot-bg:#fff}'
-      + '@media(prefers-color-scheme:dark){:root{color-scheme:dark}body{background-color:#151517;--dsh-boot-bg:#151517}}',
+      ':root{color-scheme:light}body{background-color:#f5f3ed;--dsh-boot-bg:#f5f3ed}'
+      + '@media(prefers-color-scheme:dark){:root{color-scheme:dark}body{background-color:#121310;--dsh-boot-bg:#121310}}',
     )
+  })
+
+  it('paints the selected skin canvas and installs its body selector', () => {
+    mockSystemDark(true)
+    const [head, body] = bootThemeInjections('system', 'b')
+    if (head?.kind !== 'style') throw new Error('theme head bootstrap row is not a style')
+    expect(head.text).toContain('background-color:#f7f7f5')
+    expect(head.text).toContain('background-color:#0b0b0c')
+    if (body?.kind !== 'script') throw new Error('theme body bootstrap row is not a script')
+    runInNewContext(body.text, { document, matchMedia: globalThis.matchMedia })
+    expect(document.body.getAttribute(SKIN_ATTRIBUTE)).toBe('b')
   })
 
   it('defaults to system and falls back to light when matchMedia is unavailable', () => {
@@ -78,7 +93,7 @@ describe('theme bootstrap row', () => {
 
   it('writes the durable font sizes and their defaults', () => {
     mockSystemDark(false)
-    executeBootstrap('light', { text: 22, code: 15, terminal: 18 })
+    executeBootstrap('light', 'a', { text: 22, code: 15, terminal: 18 })
     expect(document.body.style.getPropertyValue('--dsh-content-font-size')).toBe('22px')
     expect(document.body.style.getPropertyValue('--dsh-code-font-size')).toBe('15px')
     expect(document.body.style.getPropertyValue('--dsh-terminal-font-size')).toBe('18px')
@@ -90,7 +105,7 @@ describe('theme bootstrap row', () => {
 
   it('writes normalized durable font lists and leaves empty lists unset', () => {
     mockSystemDark(false)
-    const [, body] = bootThemeInjections('light', undefined, { text: 'Inter', code: '', terminal: 'MesloLGS NF</script>, monospace' })
+    const [, body] = bootThemeInjections('light', 'a', undefined, { text: 'Inter', code: '', terminal: 'MesloLGS NF</script>, monospace' })
     if (body?.kind !== 'script') throw new Error('theme body bootstrap row is not a script')
     expect(body.text).not.toContain('<')
     runInNewContext(body.text, { document, matchMedia: globalThis.matchMedia })

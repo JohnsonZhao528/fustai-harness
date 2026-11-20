@@ -7,6 +7,7 @@ import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
 import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { JsonRpcTransportPeer, SessionEventNotification } from '@deepseek-ai/dsh-sdk-protocol'
 import { MockAdapter, textResponse } from '../../../core/agent-loop/tests/mock-adapter.ts'
 import { HarnessSdkJsonRpcServer } from '../src/index.ts'
@@ -112,6 +113,45 @@ describe('SDK persisted session resume', () => {
     expect(restored.snapshotEvents().at(-1)).toMatchObject({
       type: 'turn/end', data: { turn: 3, reason: { kind: 'completed' } },
     })
+  })
+
+  it('drops unclaimed inbox input a dead process left behind', async () => {
+    const root = await storageRoot()
+    const first = await initialized(root)
+    await first.server.prompt({ sessionId: 'pending', contentBlocks: [{ type: 'text', text: 'first turn' }] })
+    await first.server.wait({ sessionId: 'pending' })
+    await first.server.shutdown()
+    const handle = await first.ctx.sessionPersistence.open(SessionId('pending'), 'write')
+    try {
+      const events = (await handle.read()).events
+      const last = events.at(-1)!
+      await handle.append([{
+        type: 'agent/inbox/spliced',
+        data: {
+          target: 'next-turn',
+          start: 0,
+          inserted: [createUserMessage({
+            content: [{ type: 'text', text: 'unclaimed' }],
+            source: { kind: 'user' },
+          })],
+        },
+        seq: SessionSeq(last.seq + 1),
+        time: last.time + 1,
+      }])
+      await handle.flush()
+    } finally {
+      await handle.close()
+    }
+    await first.ctx.fiber.dispose()
+
+    const second = await initialized(root)
+    await second.server.resume({ sessionId: 'pending' })
+    const restored = second.ctx.agents.get(SessionId('pending'))!
+    expect(restored.inbox.nextTurn).toEqual([])
+    expect(restored.inbox.nextStep).toEqual([])
+    expect(restored.session.snapshotEvents().filter(event => event.type === 'agent/inbox/spliced').at(-1))
+      .toMatchObject({ data: { target: 'next-turn', start: 0, removedCount: 1, inserted: [], outcome: 'canceled' } })
+    expect(second.adapter.requests).toHaveLength(0)
   })
 
   it('rejects missing history and releases a failed resume for retry', async () => {

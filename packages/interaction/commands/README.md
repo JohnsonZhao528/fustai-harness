@@ -45,6 +45,8 @@ ctx.commands.register({
 
 The handler returns `success` or `error` plus optional UI text that the adapter renders. `recordInput` defaults to true; a command whose own authoritative domain event already carries the payload sets it to false so the session log does not duplicate the input. Registering the same name twice in one scope throws.
 
+`ctx.commands.ownerOf(name)` reports the `RegistrationOwner` of a command's most recent live registration: the Loader entry id, the row id inside that entry's tree, and the module specifier the entry imports. It returns `undefined` for an unknown command or one registered outside a Loader entry, and falls back to the previously recorded live registration once the latest one is disposed.
+
 ### Command syntax
 
 A command line starts with a slash at byte zero, a lowercase name containing letters, digits, `_` or `-`, and then either end-of-input or whitespace. Everything after the name — including separator whitespace — is the command's `rawInput`, and the command owns its own grammar for it. Lines that are not syntactically a command, or that name an unknown command, are rejected by the adapter instead of becoming a model prompt.

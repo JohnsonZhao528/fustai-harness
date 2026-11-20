@@ -63,6 +63,8 @@ ctx.tools.register(defineTool({
 
 The unified schema DSL supports `string`, `number`, `integer`, `boolean`, `null`, `array`, `object`, author-only `json`, and exact-one `oneOf`; `InferValue` preserves exact types through 16 container levels before widening to `JsonValue`. A raw JSON Schema (`JsonSchemaNode`) is the wire-level counterpart shared with subagents, workflows, and MCP.
 
+`ctx.tools.ownerOf(name)` reports the `RegistrationOwner` of a tool's most recent live registration: the Loader entry id, the row id inside that entry's tree, and the module specifier the entry imports. It returns `undefined` for an unknown tool or one registered outside a Loader entry, and falls back to the previously recorded live registration once the latest one is disposed.
+
 ### Configure the presentation mode
 
 The `mode` config decides what the model sees: `native` (every visible schema) or `ptc` (only `run_code` plus a generated SDK). The runtime supplies evaluation syntax, output syntax and state-retention guidance through `executionInstructions`; this package owns tool-call rules, SDK declarations and image-result attachment.

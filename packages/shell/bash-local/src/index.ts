@@ -37,6 +37,10 @@ const DEFAULT_GRACE_MS = 3_000
 /** Default per-stream spill cap (the `maxSpillBytes` config). */
 const DEFAULT_MAX_SPILL_BYTES = 64 * 1024 * 1024
 
+/** Android carries no `bash`; its platform shell is the only POSIX shell available. */
+/* v8 ignore next -- no CI host reports platform 'android'. */
+const DEFAULT_SHELL = (process.platform as string) === 'android' ? '/system/bin/sh' : 'bash'
+
 /** Validated plugin configuration with live command budgets. */
 export interface Config {
   /** Default working directory for commands (default: process.cwd()). */
@@ -185,7 +189,7 @@ export class LocalBashExecutor extends ShellExecutor {
   }
 
   async execute(spec: ShellExecSpec): Promise<ShellExecution> {
-    return this.executeArgv(spec, ['bash', '-c', spec.command])
+    return this.executeArgv(spec, [process.env.DSH_BASH_SHELL ?? DEFAULT_SHELL, '-c', spec.command])
   }
 
   /**

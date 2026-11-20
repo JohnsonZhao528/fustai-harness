@@ -9,7 +9,7 @@ kind: "package-library"
 
 ## 概述
 
-`@deepseek-ai/dsh-home-paths` 让包作者能够解析 DeepSeek Harness 数据根目录，以及其消费方读取的共享 agent 配置根目录。显式路径优先于环境变量，后者优先于操作系统主目录下的默认值；空白环境变量会被忽略。其公开辅助函数可以在不暴露机器绝对路径的情况下显示根目录，仅展开单独或当前用户的波浪号形式，并规范化最终路径段尚不存在的监听目标。请把它作为库依赖直接使用，不要通过 `cordis.yml` 加载。
+`@deepseek-ai/dsh-home-paths` 解析 DeepSeek Harness 主目录、其中已登录账号的数据根目录，以及共享 agent 配置根目录。显式路径优先于环境变量，后者优先于操作系统主目录下的默认值；空白环境变量会被忽略。已登录账号会把主目录收窄为自己的根目录，因此同一台机器上的两个账号不会读到彼此的会话、设置或凭据。其辅助函数可以符号化标注根目录，仅展开单独或当前用户的波浪号形式，并规范化最终路径段尚不存在的监听目标。请把它作为库依赖直接使用，不要通过 `cordis.yml` 加载。
 
 ## 目录
 
@@ -29,16 +29,37 @@ kind: "package-library"
 ### 解析主目录
 
 ```ts
-import { resolveDshHome, dshHomePath, dshCachePath } from '@deepseek-ai/dsh-home-paths'
+import { resolveDshHome, dshBaseHome, dshHomePath, dshCachePath } from '@deepseek-ai/dsh-home-paths'
 
-const home = resolveDshHome()                // configured path, else $DSH_HOME, else ~/.dsh
+const home = resolveDshHome()                // active account's root, else the default home
+const base = dshBaseHome()                   // the home before per-account narrowing
 const settings = dshHomePath('settings')     // join one child onto the resolved home
-const cache = dshCachePath('models')         // $DSH_HOME/cache/models, default ~/.dsh/cache/models
+const cache = dshCachePath('models')         // <home>/cache/models, default ~/.dsh/cache/models
 ```
 
-显式配置的路径优先级最高，然后是 `$DSH_HOME`，最后是默认的 `~/.dsh`。空或仅含空白的 `$DSH_HOME` 视为未设置，因此空白的覆盖值绝不会把主目录解析到当前工作目录。
+显式配置的路径优先级最高，然后是 `$DSH_HOME`，最后是默认的 `~/.dsh`。空或仅含空白的 `$DSH_HOME` 视为未设置，因此空白的覆盖值绝不会把主目录解析到当前工作目录。`dshBaseHome` 报告未经收窄的该主目录；`DSH_HOME` 下的子路径只是配置值，绝不是对 harness 主目录的重新声明。
 
-`dshCachePath(...segments)` 从解析出的主目录下的 `cache` 目录派生路径。不传路径段时返回缓存目录本身。传入首个选项对象 `dshCachePath({ dshHome: home }, ...segments)` 可使用显式配置的主目录，遵循相同的优先级与波浪号展开规则。它返回绝对路径，不会创建目录。
+`dshCachePath(...segments)` 从解析出的主目录下的 `cache` 目录派生路径，因此已登录账号保留自己的下载模型、镜像与缓存。不传路径段时返回缓存目录本身。传入首个选项对象 `dshCachePath({ dshHome: home }, ...segments)` 可使用显式配置的主目录，遵循相同的优先级与波浪号展开规则。它返回绝对路径，不会创建目录。
+
+### 隔离单个账号的数据
+
+```ts
+import { ACCOUNT_UID_PATTERN, accountDataRoot, dshBaseHome, ownsHarnessHome, readAccountPointer, writeAccountPointer, type AccountPointer } from '@deepseek-ai/dsh-home-paths'
+
+const uid = 'u_1a2b'
+const base = dshBaseHome()
+const previous = readAccountPointer(base)                                // undefined until the first sign-in
+const next: AccountPointer = { activeUid: uid, firstOwnerUid: previous?.firstOwnerUid ?? uid }
+writeAccountPointer(base, next)
+const home = ownsHarnessHome(next, uid) ? base : accountDataRoot(base, uid)   // ~/.dsh or ~/.dsh/accounts/u_1a2b
+if (!ACCOUNT_UID_PATTERN.test(uid)) throw new Error(`unusable account id ${uid}`)
+```
+
+`<base>/account.json` 存放 {@link AccountPointer}：`activeUid` 指明 `resolveDshHome` 返回哪个账号的根目录，本地登出后为 `null`，首次登录前不存在；`firstOwnerUid` 指明主目录中已有数据归属的账号，且永不重新指派。{@link ownsHarnessHome} 报告这种继承关系，{@link accountDataRoot} 在 {@link DSH_ACCOUNTS_DIR_NAME} 之下构造其余账号的路径，{@link ACCOUNT_UID_PATTERN} 是它们共同接受的语法，因此目录名、指针与凭据中记录的 id 不会互相矛盾。
+
+`resolveDshHome` 每次调用都依据该指针收窄主目录；`dshBaseHome` 从不收窄。指针存放在主目录本身，所以已经把主目录指到某个账号根目录的路径——Host 为子进程重新声明的那个 `DSH_HOME`——旁边没有指针，原样解析。只有账号提供方写入指针：它把第一个登录的账号记为 `firstOwnerUid`，使机器上已有的数据留在该账号名下，后续账号则从自己的空根目录开始。消费方只读取结果，不自行比较目录。
+
+需要在整个生命周期固定一个根目录的进程，在启动时调用一次 `resolveDshHome` 并保存结果，账号提供方正是这样做的；反复调用的消费方从下一帧起就能看到新的登录。
 
 ### 解析共享 agents 根目录
 
@@ -53,7 +74,7 @@ agentsHomeDisplay(agents)            // ~/.agents, or $DSH_AGENTS_HOME for any c
 
 ### 展示主目录
 
-面向用户的路径请以符号形式渲染根目录，而不是机器路径：默认主目录显示为 `~/.dsh`，任何已配置的主目录显示为 `$DSH_HOME`，默认共享 agents 根目录显示为 `~/.agents`，任何已配置的共享 agents 根目录显示为 `$DSH_AGENTS_HOME`。两种展示形式都不会泄露机器的绝对路径。
+面向用户的路径请以符号形式渲染根目录，而不是机器路径：默认主目录显示为 `~/.dsh`，其中的账号根目录显示为 `~/.dsh/accounts/<id>`，任何已配置的主目录显示为 `$DSH_HOME`，默认共享 agents 根目录显示为 `~/.agents`，任何已配置的共享 agents 根目录显示为 `$DSH_AGENTS_HOME`。两种展示形式都不会泄露机器的绝对路径。
 
 ### 展开用户路径
 
@@ -71,17 +92,21 @@ agentsHomeDisplay(agents)            // ~/.agents, or $DSH_AGENTS_HOME for any c
 <details>
 <summary>实现细节——点击展开</summary>
 
-本包建立在一个原则上：harness 的用户数据位于同一个根目录下，而共享 agent 配置根目录保持独立，因为其他 agent 工具也会读取它。`resolveRoot` 与 `rootDisplay` 负责两个根目录的优先级与展示规则，因此两者不会彼此漂移。
+本包建立在两条规则上：harness 的用户数据位于同一个主目录下，并收窄到已登录账号自己的根目录；共享 agent 配置根目录保持独立，因为其他 agent 工具也会读取它。`resolveRoot` 与 `rootDisplay` 负责两个根目录的优先级与展示规则，因此两者不会彼此漂移。
 
 ### 源码地图
 
 | 文件 | 职责 |
 |---|---|
-| [`src/index.ts`](src/index.ts) | 主目录解析、路径拼接、展示、波浪号展开与监听路径规范化 |
+| [`src/index.ts`](src/index.ts) | 主目录解析、账号指针收窄、路径拼接、展示、波浪号展开与监听路径规范化 |
 
 ### 解析规则
 
-`resolveDshHome` 先读显式覆盖值，然后读 `$DSH_HOME`，最后回退到操作系统主目录拼接 `.dsh`。`resolveAgentsHome` 对 `$DSH_AGENTS_HOME` 与 `~/.agents` 读取同样的三层值。选中的值经过波浪号展开并规范化为绝对路径；`dshHomePath` 用 Node 的平台路径规则拼接子路径段。`dshHomeDisplay` 与 `agentsHomeDisplay` 把解析出的路径与默认根目录比较并返回符号标签，因此已配置的根目录绝不泄露其绝对路径。
+`resolveDshHome` 先读显式覆盖值，然后读 `$DSH_HOME`，最后回退到操作系统主目录拼接 `.dsh`，并把该主目录收窄到已登录账号的根目录。`resolveAgentsHome` 对 `$DSH_AGENTS_HOME` 与 `~/.agents` 读取同样的三层值。选中的值经过波浪号展开并规范化为绝对路径；`dshHomePath` 用 Node 的平台路径规则拼接子路径段。`dshHomeDisplay` 与 `agentsHomeDisplay` 把解析出的路径与默认根目录比较并返回符号标签，因此已配置的根目录绝不泄露其绝对路径。
+
+### 账号指针规则
+
+`readAccountPointer` 只在 `account.json` 不存在时报告缺失：无法读取、无法解析或不符合 {@link AccountPointer} 布局的文件都会抛出异常，因此损坏的指针会中止启动，而不是悄悄回退到共享主目录。`writeAccountPointer` 在主目录缺失时创建它，并通过同目录下的临时文件替换指针，因此读取方永远看不到写了一半的指针。临时文件与指针沿用 harness 主目录本已严格的权限，目录 `0700`、文件 `0600`。
 
 ### 规范化机制
 
@@ -99,6 +124,7 @@ agentsHomeDisplay(agents)            // ~/.agents, or $DSH_AGENTS_HOME for any c
 - [boot 包](../../boot/app-boot/README.zh.md)——在任何插件挂载之前解析主目录的启动器。
 - [shell 环境](../../shell/shell-env/README.zh.md)——`DSH_HOME` 如何到达模型 shell 调用。
 - [匿名用户 id](../../identity/anonymous-user-id/README.zh.md)——位于解析后主目录下的存储身份文件。
+- [DeepSeek 账号 Platform 提供方](../../credentials/deepseek-account-platform/README.zh.md)——写入指针并在根目录之间搬迁凭据的插件。
 
 -----
 
@@ -111,6 +137,7 @@ agentsHomeDisplay(agents)            // ~/.agents, or $DSH_AGENTS_HOME for any c
 
 - **展开范围刻意保持狭窄**——只有单独的 `~`、`~/...` 和 `~\...` 使用当前操作系统主目录；`~alice/...` 等指定用户的形式、环境变量与 shell 表达式保持不变。
 - **规范化只读不改**——`canonicalizeWatchPath` 执行 `realpath` 探测并传播除路径不存在以外的错误；调用方仍负责目录创建、权限，以及对结果路径应用信任策略。
+- **指针损坏即中止解析**——`account.json` 存在但不符合该布局时，`readAccountPointer` 与 `resolveDshHome` 都会抛出异常，因为回退到共享主目录会让一个账号看到另一个账号的数据。
 
 <a id="dev-note"></a>
 ### 开发备注
@@ -118,6 +145,6 @@ agentsHomeDisplay(agents)            // ~/.agents, or $DSH_AGENTS_HOME for any c
 <details>
 <summary>维护者的工作上下文——点击展开</summary>
 
-无。
+账号指针是 harness 专属的。它的文件名、目录语法与收窄规则都留在本包，因此只想要数据根目录的调用方，与直接检查指针的调用方得到同一个答案。
 
 </details>

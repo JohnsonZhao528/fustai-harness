@@ -239,6 +239,15 @@ declare module './types.ts' {
    * @param message - identified injected context and the source that supplied it.
    */
     inject(message: UserMessage): void
+
+    /**
+   * Start a turn for input already parked in the inbox after the driver
+   * reported `idle`, such as steering a failed turn never claimed. Unlike
+   * {@link send}, this adds no message: it replays queued work as a turn of its
+   * own. A running or maintaining driver, an empty inbox, or a disposed agent
+   * makes this a no-op, so an observer may call it on every idle report.
+   */
+    wake(): void
   }
 }
 

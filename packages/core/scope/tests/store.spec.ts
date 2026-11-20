@@ -4,6 +4,7 @@ import {
   AnonymousEntries,
   createScope,
   NamedEntries,
+  NamedOwners,
   ScopedLayers,
   type Scope,
   type ScopeKey,
@@ -103,6 +104,35 @@ describe('AnonymousEntries', () => {
 
     expect(values.next().done).toBe(true)
     expect([...entries.values()]).toEqual([2])
+  })
+})
+
+describe('NamedOwners', () => {
+  it('reports the most recent live owner and restores earlier registrations on idempotent undo', () => {
+    const owners = new NamedOwners<string>()
+    expect(owners.latest('unknown')).toBeUndefined()
+
+    const undoFirst = owners.track('name', 'first')
+    expect(owners.latest('name')).toBe('first')
+    const undoSecond = owners.track('name', 'second')
+    expect(owners.latest('name')).toBe('second')
+
+    undoSecond()
+    undoSecond()
+    expect(owners.latest('name')).toBe('first')
+    undoFirst()
+    expect(owners.latest('name')).toBeUndefined()
+  })
+
+  it('keeps repeat registrations by one owner separate', () => {
+    const owners = new NamedOwners<string>()
+    const undoFirst = owners.track('name', 'same')
+    const undoSecond = owners.track('name', 'same')
+
+    undoFirst()
+    expect(owners.latest('name')).toBe('same')
+    undoSecond()
+    expect(owners.latest('name')).toBeUndefined()
   })
 })
 

@@ -63,6 +63,8 @@ ctx.tools.register(defineTool({
 
 统一 schema DSL 支持 `string`、`number`、`integer`、`boolean`、`null`、`array`、`object`、仅供作者使用的 `json` 与恰好匹配一个分支的 `oneOf`；`InferValue` 在 16 层容器内保留精确类型，之后加宽为 `JsonValue`。原始 JSON Schema（`JsonSchemaNode`）是与 subagent、工作流和 MCP 共享的协议级对应类型。
 
+`ctx.tools.ownerOf(name)` 返回某工具最近一次生效注册的 `RegistrationOwner`：Loader 条目 id、该条目树内的行 id，以及条目导入的模块说明符。工具未知或注册发生在 Loader 条目之外时返回 `undefined`；最近一次注册被释放后，回退到此前记录的仍生效注册。
+
 ### 配置呈现模式
 
 `mode` 配置决定模型看到什么：`native`（每个可见 schema）或 `ptc`（只有 `run_code` 加一份生成 SDK）。运行时通过 `executionInstructions` 提供求值语法、输出方式和状态保留指引；本包负责工具调用规则、SDK 声明和图片结果附加。

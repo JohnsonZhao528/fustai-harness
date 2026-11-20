@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { credentialKey, credentialKeyScope, credentialRef, parseCredentialKey } from '@deepseek-ai/dsh-credentials'
 import type { CredentialKey, CredentialRecord } from '@deepseek-ai/dsh-credentials'
-import { LocalCredentialProvider } from '../src/index.ts'
+import { LocalCredentialProvider, storeCredentialRecord } from '../src/index.ts'
 
 /** Credential documents are seeded owner-only, exactly as the provider creates them. */
 function writeCredentials(file: string, text: string): Promise<void> {
@@ -345,5 +345,61 @@ describe('record mutation', () => {
     await expect(credentials.modifyRecord(CODEX, () => Promise.resolve({ kind: 'grant', payload: 1 })))
       .rejects.toThrow(/disposed/)
     await expect(credentials.deleteRecord(CODEX)).rejects.toThrow(/disposed/)
+  })
+})
+
+describe('record handoff across documents', { timeout: 60_000 }, () => {
+  it('stores a record in a document no provider owns, readable by the next boot', async () => {
+    const dir = await tempDir()
+    const target = join(dir, 'accounts', 'u1', '.credentials.yaml')
+    await storeCredentialRecord(target, CODEX, { kind: 'grant', payload: { token: 'tok' } })
+    const ctx = await boot({ path: target, watch: false })
+    expect(await ctx.credentials.readRecord(CODEX)).toEqual({ kind: 'grant', payload: { token: 'tok' } })
+    await expect(storeCredentialRecord(target, BEDROCK, { kind: 'api-key', key: 'sk-1' })).resolves.toBeUndefined()
+    // A provider booted before the handoff keeps the snapshot it booted with;
+    // the handoff's consumer is the boot that follows it.
+    const rebooted = await boot({ path: target, watch: false })
+    expect(await rebooted.credentials.readRecord(BEDROCK)).toEqual({ kind: 'api-key', key: 'sk-1' })
+  })
+
+  it('keeps the untouched entries and comments already in the target document', async () => {
+    const dir = await tempDir()
+    const target = join(dir, '.credentials.yaml')
+    await writeCredentials(target, `version: 1\nrefs:\n  # chosen by hand\n  DEEPSEEK_API_KEY: sk-owner\nrecords:\n  llm-kimi/openai-codex:\n    kind: api-key\n`)
+    await storeCredentialRecord(target, CODEX, { kind: 'grant', payload: { token: 'tok' } })
+
+    const text = await readFile(target, 'utf8')
+    expect(text).toContain('# chosen by hand')
+    expect(text).toContain('DEEPSEEK_API_KEY: sk-owner')
+    expect(text).toContain('llm-kimi/openai-codex')
+    const ctx = await boot({ path: target, watch: false })
+    expect(await ctx.credentials.readRecord(CODEX)).toEqual({ kind: 'grant', payload: { token: 'tok' } })
+    expect(await ctx.credentials.resolve(credentialRef('DEEPSEEK_API_KEY'))).toEqual({ value: 'sk-owner', source: 'file' })
+  })
+
+  it('replaces the record already stored under the key rather than appending a second one', async () => {
+    const dir = await tempDir()
+    const target = join(dir, '.credentials.yaml')
+    await storeCredentialRecord(target, CODEX, { kind: 'grant', payload: { token: 'old' } })
+    await storeCredentialRecord(target, CODEX, { kind: 'grant', payload: { token: 'new' } })
+    const ctx = await boot({ path: target, watch: false })
+    expect(await ctx.credentials.readRecord(CODEX)).toEqual({ kind: 'grant', payload: { token: 'new' } })
+    expect(await ctx.credentials.listRecords()).toEqual([{ key: CODEX, kind: 'grant' }])
+  })
+
+  it('refuses a target document this build could not read back', async () => {
+    const dir = await tempDir()
+    const target = join(dir, '.credentials.yaml')
+    await writeCredentials(target, 'version: 2\nrecords: {}\n')
+    await expect(storeCredentialRecord(target, CODEX, { kind: 'grant', payload: { token: 'tok' } }))
+      .rejects.toThrow(/this build reads version 1/)
+    expect(await readFile(target, 'utf8')).toBe('version: 2\nrecords: {}\n')
+  })
+
+  it('refuses a record the store cannot represent', async () => {
+    const dir = await tempDir()
+    const target = join(dir, '.credentials.yaml')
+    await expect(storeCredentialRecord(target, CODEX, { kind: 'api-key', key: '' }))
+      .rejects.toThrow(/credentials-local/)
   })
 })

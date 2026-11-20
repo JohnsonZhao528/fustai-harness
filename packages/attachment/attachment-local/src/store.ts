@@ -2,12 +2,13 @@
 
 import { createHash, randomUUID } from 'node:crypto'
 import { constants, createReadStream } from 'node:fs'
-import { chmod, link, mkdir, open, readFile, unlink } from 'node:fs/promises'
+import { chmod, mkdir, open, readFile, unlink } from 'node:fs/promises'
 import { dirname, join, parse, resolve } from 'node:path'
 import {
   AttachmentError,
   AttachmentId,
 } from '@deepseek-ai/dsh-attachment'
+import { linkOrCopyExclusive } from '@deepseek-ai/dsh-atomic-write'
 import type {
   ImageAttachmentLimits,
   ImageAttachmentRef,
@@ -133,7 +134,18 @@ async function syncDirectory(path: string): Promise<void> {
   /* v8 ignore next -- Windows cannot open directory handles; NTFS metadata journaling owns entry durability there. */
   if (process.platform === 'win32') return
   /* v8 ignore start -- Windows cannot exercise directory fsync; POSIX behavior tests enforce this peer. */
-  const handle = await open(path, constants.O_RDONLY)
+  let handle
+  try {
+    handle = await open(path, constants.O_RDONLY)
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    // Android ancestors above the app sandbox (`/data/user/0` is 0771 system:system) cannot be
+    // opened by the app uid. They are system-owned and already durable, so skip them instead of
+    // failing every image attachment with EACCES.
+    /* v8 ignore start -- no CI host reports platform 'android'. */
+    if ((process.platform as string) === 'android' && (code === 'EACCES' || code === 'EPERM')) return
+    throw error
+  }
   try {
     await handle.sync()
   } finally {
@@ -280,7 +292,7 @@ export async function publishImmutableAlias(
     const boundary = await ensureDurableHome(dirname(dirname(resolve(root))))
     await ensureDurableDirectory(parent, boundary)
     try {
-      await link(source, target)
+      await linkOrCopyExclusive(source, target)
     } catch (error) {
       /* v8 ignore next -- Private same-filesystem directories make EEXIST the only recoverable link race. */
       if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error
@@ -356,7 +368,7 @@ async function publishStagedObject(
   try {
     await ensureDurableDirectory(parent, staged.boundary)
     try {
-      await link(staged.path, target)
+      await linkOrCopyExclusive(staged.path, target)
     } catch (error) {
       /* v8 ignore next -- Private same-filesystem directories make EEXIST the only recoverable link race. */
       if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error

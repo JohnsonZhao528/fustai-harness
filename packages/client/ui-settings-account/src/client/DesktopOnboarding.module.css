@@ -101,24 +101,6 @@
 :global(body[data-ds-dark-theme]) .lightIllustration { display: none; }
 :global(body[data-ds-dark-theme]) .darkIllustration { display: block; }
 
-.credit {
-  display: grid;
-  grid-template-columns: minmax(0, 594px) minmax(0, 400px);
-  justify-content: center;
-  align-items: center;
-  gap: clamp(32px, calc((100vw - 994px) / 3), 164px);
-  max-width: 1196px;
-  transform: translate(-50%, calc(-50% - 5px));
-}
-
-.creditIllustration { width: 100%; height: auto; aspect-ratio: 594 / 509; object-fit: contain; }
-.credit .copy { max-width: 400px; }
-.creditActions { display: flex; gap: 24px; margin-top: 60px; }
-.creditActions > button { flex: 1; max-width: 160px; }
-.creditActions .laterAction { background: var(--dsw-alias-onboarding-secondary-fill); }
-.creditActions .laterAction:hover:not(:disabled) {
-  background: linear-gradient(var(--dsw-alias-interactive-bg-hover), var(--dsw-alias-interactive-bg-hover)), var(--dsw-alias-onboarding-secondary-fill);
-}
 .page button { transition: background-color 120ms ease, color 120ms ease, opacity 120ms ease; }
 
 .purpose, .process {
@@ -257,7 +239,6 @@
   .card { padding: 24.5px 32.5px 32.5px; min-height: 187px; }
   .processCards { min-height: 0; padding-block: 0; }
   .primaryAction { margin-top: 40px; }
-  .creditActions { margin-top: 32px; }
 }
 
 @media (max-width: 1200px) {

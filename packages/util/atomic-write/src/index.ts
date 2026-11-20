@@ -1,9 +1,13 @@
 /**
- * Zero-dependency atomic file replacement and writer coordination.
+ * Zero-dependency atomic file replacement, exclusive publication, and writer
+ * coordination.
  * `writeFileAtomic` writes a random-suffix sibling with exclusive create and
  * the caller's permission bits, then renames it over the target, so readers
  * observe either the old or the new complete content and a replaced file ends
- * up with exactly the stated mode. `withFileLock` serializes cross-process
+ * up with exactly the stated mode. `linkOrCopyExclusive` publishes an existing
+ * file under a name that must not exist yet, copying it where the host refuses
+ * a hard link while keeping `link()`'s `EEXIST` failure for an occupied name.
+ * `withFileLock` serializes cross-process
  * writers of one file through a `wx`-created `<file>.lock` sibling, so a
  * read-modify-write cycle can never resurrect a state another writer just
  * replaced; readers stay lock-free because the rename commit is atomic. A lock
@@ -12,7 +16,8 @@
  */
 
 import { createHash, randomBytes } from 'node:crypto'
-import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { copyFile, link, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { setTimeout as wait } from 'node:timers/promises'
 
@@ -269,5 +274,66 @@ export async function withFileLock<T>(
     return await operation()
   } finally {
     await rm(lockPath, { force: true })
+  }
+}
+
+/**
+ * The `link()` failures that mean this host cannot hard-link the pair. Android
+ * app storage refuses the call under SELinux (`EACCES`/`EPERM`), a file
+ * filesystem without hard-link support reports `EPERM`/`ENOSYS`/`ENOTSUP`, a
+ * target on another device reports `EXDEV`, and a file at the link limit
+ * reports `EMLINK`. Every other failure (a missing source, an occupied target)
+ * is the caller's own outcome and stays with `link()`.
+ */
+const LINK_FALLBACK_CODES: ReadonlySet<string> = new Set([
+  'EACCES',
+  'EPERM',
+  'ENOSYS',
+  'ENOTSUP',
+  'EOPNOTSUPP',
+  'EXDEV',
+  'EMLINK',
+])
+
+/**
+ * Publish `source` at `target` with `link()`'s exclusive-create semantics,
+ * copying instead where this host refuses a hard link (see
+ * {@link LINK_FALLBACK_CODES}). The fallback copies `source` to a random-suffix
+ * sibling first, so no reader observes a partial file under `target`, and it
+ * renames that sibling into place only after an `lstat` proves the name is
+ * still free — a target that appeared meanwhile fails with the `EEXIST` shape a
+ * racing `link()` produces. The published file then shares no inode with
+ * `source`, so a caller that keeps writing through `source` must not rely on
+ * `target` following those writes.
+ * @param source - the complete existing file to publish, read and copied as-is.
+ * @param target - the name to occupy; it must not exist.
+ * @returns a promise resolving once `target` names the complete content.
+ */
+export async function linkOrCopyExclusive(source: string, target: string): Promise<void> {
+  try {
+    await link(source, target)
+    return
+  } catch (error) {
+    if (!LINK_FALLBACK_CODES.has((error as NodeJS.ErrnoException | null)?.code ?? '')) throw error
+  }
+  const temporary = `${target}.${randomBytes(6).toString('hex')}.copy`
+  await copyFile(source, temporary, constants.COPYFILE_EXCL)
+  try {
+    try {
+      await lstat(target)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException | null)?.code !== 'ENOENT') throw error
+      await renameAtomicTemp(temporary, target)
+      return
+    }
+    throw Object.assign(new Error(`EEXIST: file already exists, link '${source}' -> '${target}'`), {
+      code: 'EEXIST',
+      errno: -17,
+      syscall: 'link',
+      path: source,
+      dest: target,
+    })
+  } finally {
+    await rm(temporary, { force: true })
   }
 }

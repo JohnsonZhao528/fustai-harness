@@ -39,6 +39,10 @@
 - id: authorization
   disabled: true
 
+# Browser sign-in writes the interactive credential store that headless does not mount.
+- id: deepseek-account
+  disabled: true
+
 # Preset provider routes, mirroring the desktop release seed, so the default
 # model resolves out of the box. With `credentials` disabled each apiKeyEnv
 # resolves through the launch environment; a named-but-unset key fails loud

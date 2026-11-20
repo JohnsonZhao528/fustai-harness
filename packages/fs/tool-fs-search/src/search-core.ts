@@ -157,16 +157,19 @@ function completeStdout(toolName: string, stdout: SubprocessOutputRead, rawOutpu
 let rgPathPromise: Promise<string> | undefined
 
 /**
- * The packaged ripgrep binary path, resolved lazily once per process.
+ * The ripgrep executable path, resolved lazily once per process.
  *
  * A single-file runtime uses the executable's `-rg` sidecar because a native
- * helper cannot be spawned from pkg's virtual filesystem. Node-mode builds
- * fall back to the platform package selected by `@vscode/ripgrep`. Resolving
- * at the call boundary keeps a missing or corrupt binary at the first search
- * call as `SEARCH_FAILED`, rather than failing the Loader composition.
+ * helper cannot be spawned from pkg's virtual filesystem. Android selects
+ * `DSH_RG_PATH` or the PATH `rg` its app installs, because no platform package
+ * exists there. Node-mode builds otherwise fall back to the platform package
+ * selected by `@vscode/ripgrep`, and to PATH `rg` when that optional package is
+ * absent. Resolving at the call boundary keeps a missing or corrupt binary at
+ * the first search call as `SEARCH_FAILED`, rather than failing the Loader
+ * composition.
  *
- * @returns the packaged binary's absolute path; the memoized promise rejects
- *   when the platform package cannot be resolved.
+ * @returns the executable path, or the PATH command `rg`; the memoized promise
+ *   does not reject for an absent platform package.
  */
 export function resolveRgPath(): Promise<string> {
   rgPathPromise ??= Promise.resolve().then(async () => {
@@ -175,7 +178,19 @@ export function resolveRgPath(): Promise<string> {
       ? join(executable.dir, `${executable.name}-rg.exe`)
       : `${process.execPath}-rg`
     if ('pkg' in process && existsSync(executableSidecar)) return executableSidecar
-    const dependency = (await import('@vscode/ripgrep')).rgPath
+    // Android has no `@vscode/ripgrep` platform package, and its binaries are pruned from the
+    // engine: the app points at its own `rg` (DSH_RG_PATH) or installs one on PATH.
+    if (process.env.DSH_RG_PATH !== undefined) return process.env.DSH_RG_PATH
+    /* v8 ignore next -- no CI host reports platform 'android'. */
+    if ((process.platform as string) === 'android') return 'rg'
+    let dependency: string
+    try {
+      dependency = (await import('@vscode/ripgrep')).rgPath
+    } catch {
+      // Only an omitted optional platform package reaches here; PATH `rg` replaces it.
+      return 'rg'
+    }
+    if (!existsSync(dependency)) return 'rg'
     return process.versions.electron === undefined
       ? dependency
       : dependency.replace(/\.asar(?=[\\/])/u, '.asar.unpacked')

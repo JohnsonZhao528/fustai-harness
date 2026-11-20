@@ -93,6 +93,54 @@ export function resolveSpec(config: Config): ResolvedSpec {
   }
 }
 
+/**
+ * Read, validate and replace one record in the credentials document at an
+ * explicit path, without a provider instance. A record has to move between the
+ * harness home and a signed-in account's data root while the running provider
+ * still owns only the document it booted with, so the write names its target
+ * directly and uses the same lock, permission modes, comment-preserving render
+ * and admission checks as {@link LocalCredentialProvider.modifyRecord}. Untouched
+ * entries and their comments survive; a document that exists but cannot be
+ * parsed is refused rather than rebuilt, because the next boot would reject
+ * what this write produced.
+ * @param filename - absolute document path; its directory is created at `0700`.
+ * @param key - record to write.
+ * @param record - the record to store, admitted by the read path's own checks.
+ * @throws when the document is group- or other-readable, cannot be parsed, or
+ * the record holds a value this store cannot represent.
+ */
+export async function storeCredentialRecord(
+  filename: string,
+  key: CredentialKey,
+  record: CredentialRecord,
+): Promise<void> {
+  await mkdir(dirname(filename), { recursive: true, mode: 0o700 })
+  await withFileLock(filename, async () => {
+    await assertOwnerOnly(filename)
+    const text = await readDocumentText(filename)
+    if (text !== undefined) assertReadableDocument(text, filename)
+    // Admitted before it is rendered, on the same terms as a live provider.
+    if (record.kind === 'grant') assertJsonValue(`record "${key}" payload`, record.payload, new Set())
+    else assertStorableApiKey(key, record)
+    await writeFileAtomic(filename, renderRecord(text, key, record), { mode: 0o600, dirMode: 0o700 })
+  }, { waitMs: DOCUMENT_LOCK_WAIT_MS })
+}
+
+/** Read a document's text; absence is the empty store. */
+async function readDocumentText(filename: string): Promise<string | undefined> {
+  try {
+    return await readFile(filename, 'utf8')
+  } catch (error) {
+    if (isENOENT(error)) return undefined
+    throw error
+  }
+}
+
+/** Prove the target document is one this build can read back before editing it. */
+function assertReadableDocument(text: string, filename: string): void {
+  parseCredentialsDocument(text, filename)
+}
+
 /** Permission bits outside the owner; a credentials document must have none of them. */
 const GROUP_OTHER_BITS = 0o077
 

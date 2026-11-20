@@ -41,7 +41,6 @@ afterEach(() => {
 
 function mount(initiallyDone = false, initiallyLoading = false) {
   let state: DesktopOnboardingState = {
-    creditFunded: false,
     visible: !initiallyDone && !initiallyLoading, status: initiallyLoading ? 'loading' : 'ready', error: null,
     progress: { version: 1, step: initiallyDone ? 'done' : 'welcome', purpose: null, process: null,
       completion: initiallyDone ? 'completed' : null, usage: 'compact', developerTools: false },

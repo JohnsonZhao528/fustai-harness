@@ -186,6 +186,10 @@ describe('bypassesProxy', () => {
     ['EXAMPLE.com', 'http://example.COM/a', true],
     ['localhost', 'http://localhost:3000/a', true],
     ['127.0.0.1', 'http://127.0.0.1:7777/a', true],
+    ['192.168.*', 'http://192.168.1.7/a', true],
+    ['192.168.*', 'http://10.0.0.1/a', false],
+    ['10.*.0.1', 'http://10.7.0.1/a', true],
+    ['api-*.example.com', 'http://api-eu.example.com/a', true],
   ]
   it.each(cases)('bypass %j against %j is %s', (noProxy, url, expected) => {
     expect(bypassesProxy(noProxy, new URL(url))).toBe(expected)

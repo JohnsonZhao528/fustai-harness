@@ -5,7 +5,7 @@ import { lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile 
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { withFileLock, writeFileAtomic } from '../src/index.ts'
+import { linkOrCopyExclusive, withFileLock, writeFileAtomic } from '../src/index.ts'
 
 const state = vi.hoisted(() => ({
   afterClaim: undefined as ((claim: string) => Promise<void>) | undefined,
@@ -16,6 +16,9 @@ const state = vi.hoisted(() => ({
   releaseLockBeforeProbe: false,
   renameAttempts: 0,
   renameFailures: [] as string[],
+  linkFailure: undefined as string | undefined,
+  probeFailure: undefined as string | undefined,
+  probeFailureSuffix: '.probe-failure',
 }))
 
 vi.mock('node:fs/promises', async (importOriginal) => {
@@ -31,6 +34,19 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       }
       return actual.rename(...args)
     }),
+    link: (async (...args: Parameters<typeof actual.link>) => {
+      const code = state.linkFailure
+      if (code === undefined) return actual.link(...args)
+      if (code === 'NO_CODE') throw new Error('injected link failure without a code')
+      throw Object.assign(new Error(`${code}: injected link failure`), { code })
+    }),
+    lstat: (async (...args: Parameters<typeof actual.lstat>) => {
+      const code = state.probeFailure
+      if (code !== undefined && String(args[0]).endsWith(state.probeFailureSuffix)) {
+        throw Object.assign(new Error(`${code}: injected target probe failure`), { code })
+      }
+      return actual.lstat(...args)
+    }) as typeof actual.lstat,
     rm: (async (...args: Parameters<typeof actual.rm>) => {
       if (state.claimRemovalFails && String(args[0]).includes('.lock.takeover-')) {
         throw Object.assign(new Error('EBUSY: injected claim removal failure'), { code: 'EBUSY' })
@@ -72,6 +88,8 @@ afterEach(async () => {
   state.releaseLockBeforeProbe = false
   state.renameAttempts = 0
   state.renameFailures.length = 0
+  state.linkFailure = undefined
+  state.probeFailure = undefined
   await Promise.all(scratchDirs.splice(0).map(dir => rm(dir, {
     force: true,
     maxRetries: 10,
@@ -506,5 +524,84 @@ describe('withFileLock', () => {
     release()
     await holder
     expect(await patient).toBe('patient')
+  })
+})
+
+describe('linkOrCopyExclusive', () => {
+  it('publishes through a hard link where the host supports one', async () => {
+    const dir = await scratch()
+    const source = join(dir, 'source')
+    const target = join(dir, 'target')
+    await writeFile(source, 'linked content')
+
+    await linkOrCopyExclusive(source, target)
+
+    expect(await readFile(target, 'utf8')).toBe('linked content')
+    // One inode under two names: proves the fast path did not copy.
+    expect((await lstat(target)).ino).toBe((await lstat(source)).ino)
+  })
+
+  it('copies when the host refuses to hard-link the pair', async () => {
+    state.linkFailure = 'EPERM'
+    const dir = await scratch()
+    const source = join(dir, 'source')
+    const target = join(dir, 'target')
+    await writeFile(source, 'sandboxed content')
+
+    await linkOrCopyExclusive(source, target)
+
+    expect(await readFile(target, 'utf8')).toBe('sandboxed content')
+    expect((await lstat(target)).ino).not.toBe((await lstat(source)).ino)
+    // The copy's random-suffix sibling is gone, so the directory holds only the pair.
+    expect((await readdir(dir)).sort()).toEqual(['source', 'target'])
+  })
+
+  it('keeps link() outcome for a failure the fallback does not cover', async () => {
+    state.linkFailure = 'ENOENT'
+    const dir = await scratch()
+
+    await expect(linkOrCopyExclusive(join(dir, 'absent'), join(dir, 'target')))
+      .rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readdir(dir)).toEqual([])
+  })
+
+  it('keeps link() outcome for a failure that carries no code', async () => {
+    state.linkFailure = 'NO_CODE'
+    const dir = await scratch()
+    const source = join(dir, 'source')
+    await writeFile(source, 'content')
+
+    await expect(linkOrCopyExclusive(source, join(dir, 'target')))
+      .rejects.toThrow('injected link failure without a code')
+  })
+
+  it('fails EEXIST when a name appeared before the copy could be published', async () => {
+    state.linkFailure = 'EXDEV'
+    const dir = await scratch()
+    const source = join(dir, 'source')
+    const target = join(dir, 'target')
+    await writeFile(source, 'source content')
+    await writeFile(target, 'winner content')
+
+    await expect(linkOrCopyExclusive(source, target)).rejects.toMatchObject({
+      code: 'EEXIST',
+      syscall: 'link',
+      path: source,
+      dest: target,
+    })
+    expect(await readFile(target, 'utf8')).toBe('winner content')
+    expect((await readdir(dir)).sort()).toEqual(['source', 'target'])
+  })
+
+  it('rethrows an unexpected target probe failure and drops the copy', async () => {
+    state.linkFailure = 'EACCES'
+    state.probeFailure = 'EIO'
+    const dir = await scratch()
+    const source = join(dir, 'source')
+    const target = join(dir, `target${state.probeFailureSuffix}`)
+    await writeFile(source, 'content')
+
+    await expect(linkOrCopyExclusive(source, target)).rejects.toMatchObject({ code: 'EIO' })
+    expect(await readdir(dir)).toEqual(['source'])
   })
 })

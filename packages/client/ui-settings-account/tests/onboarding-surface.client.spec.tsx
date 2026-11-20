@@ -81,12 +81,12 @@ describe('OnboardingSurface', () => {
   })
 })
 
-it('restores interaction when onboarding and its recharge overlay unmount together', () => {
+it('restores interaction when onboarding and the Platform overlay unmount together', () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
   try {
     const bridge = { open: async () => {}, close: async () => {}, setBounds: async () => {} }
     const view = render(<><OnboardingSurface>onboarding</OnboardingSurface>
-      <PlatformOverlay bridge={bridge} page="top-up" backLabel="Back" loadingLabel="Loading" failureLabel="Failed" retryLabel="Retry" onClose={() => {}} /></>)
+      <PlatformOverlay bridge={bridge} page="usage" backLabel="Back" loadingLabel="Loading" failureLabel="Failed" retryLabel="Retry" onClose={() => {}} /></>)
     expect(appRoot.inert).toBe(true)
     view.unmount()
     expect(appRoot.inert).toBe(false)

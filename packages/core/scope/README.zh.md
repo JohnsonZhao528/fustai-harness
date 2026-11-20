@@ -43,7 +43,7 @@ await scope.dispose()   // unwinds every registration made through scope.ctx
 
 ### 构建带作用域的注册表层
 
-注册表作者使用 `ScopedLayers`、`NamedEntries` 与 `AnonymousEntries` 持有一个立即构造的全局层加惰性创建的精确作用域层：读取从不创建层，`merge()` 沿作用域链物化按插入序的具名遮蔽，`effect()` 从同一上下文推导可见性与所有权。只有当整个聚合为空时才回收作用域层。
+注册表作者使用 `ScopedLayers`、`NamedEntries` 与 `AnonymousEntries` 持有一个立即构造的全局层加惰性创建的精确作用域层：读取从不创建层，`merge()` 沿作用域链物化按插入序的具名遮蔽，`effect()` 从同一上下文推导可见性与所有权。只有当整个聚合为空时才回收作用域层。`NamedOwners` 把每个名称的每次生效注册归属于其所有者，使发现过程在遮蔽该名称的注册被移除后仍能指出仍生效的贡献者。
 
 -----
 
@@ -64,7 +64,7 @@ await scope.dispose()   // unwinds every registration made through scope.ctx
 | 文件 | 职责 |
 |---|---|
 | [`src/index.ts`](src/index.ts) | `createScope`、`scopeOf`、`scopeTarget`、`bindScopeParent`/`scopeParentOf`/`scopeChainOf`、载体标记 |
-| [`src/store.ts`](src/store.ts) | `ScopedLayers`、`NamedEntries`、`AnonymousEntries`、`ScopeLayer` |
+| [`src/store.ts`](src/store.ts) | `ScopedLayers`、`NamedEntries`、`NamedOwners`、`AnonymousEntries`、`ScopeLayer` |
 
 ### 父链
 

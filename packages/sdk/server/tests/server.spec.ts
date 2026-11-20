@@ -21,6 +21,11 @@ import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-j
 import * as LlmDeepSeek from '@deepseek-ai/dsh-llm-deepseek-api-key'
 import SubagentRuntime, { SubagentRunId, type SubagentStartRequest, type SubagentRun, type SubagentResult, type SubagentRunEndInfo } from '@deepseek-ai/dsh-subagent'
 import type { JsonRpcTransportPeer } from '@deepseek-ai/dsh-sdk-protocol'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import type { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
+import type { ApprovalOutcome } from '@deepseek-ai/dsh-user-approval'
+import type { ApprovalRequestEvent } from '@deepseek-ai/dsh-user-approval/types'
+import type { AskUserQuestionAnswer, AskUserQuestionRequestEvent } from '@deepseek-ai/dsh-user-questions/types'
 import { HarnessSdkJsonRpcServer } from '../src/index.ts'
 
 class FakeTransport implements JsonRpcTransportPeer {
@@ -324,6 +329,99 @@ describe('HarnessSdkJsonRpcServer', () => {
     expect(otherHandle.dispose).toHaveBeenCalledOnce()
   })
 
+  it('records a canonical client time zone on the queued user message source', async () => {
+    const followup = vi.fn<Agent['followup']>()
+    const agent = ({ id: SessionId('zone'), followup } satisfies Pick<Agent, 'id' | 'followup'>) as unknown as Agent
+    const handle = { agent, dispose: vi.fn(() => Promise.resolve()) }
+    const ctx = {
+      on: vi.fn(() => () => undefined),
+      agents: { create: vi.fn(async () => handle), get: () => agent },
+      get: () => undefined,
+    } as unknown as Context
+    const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
+    // This isolated prompt test begins after the handshake boundary.
+    ;(server as unknown as { initialized: boolean }).initialized = true
+    const prompt = (clientTimeZone?: string) => server.prompt({
+      sessionId: 'zone',
+      contentBlocks: [{ type: 'text', text: 'schedule it' }],
+      ...clientTimeZone === undefined ? {} : { clientTimeZone },
+    })
+
+    await prompt('Asia/Shanghai')
+    await prompt('Shanghai')
+    await prompt()
+
+    expect(followup.mock.calls[0]?.[0].source).toEqual({
+      kind: 'user',
+      rpcId: expect.any(String),
+      clientTimeZone: 'Asia/Shanghai',
+    })
+    // A non-canonical zone is dropped rather than carried into durable history.
+    expect(followup.mock.calls[1]?.[0].source).toEqual({ kind: 'user', rpcId: expect.any(String) })
+    expect(followup.mock.calls[2]?.[0].source).toEqual({ kind: 'user', rpcId: expect.any(String) })
+    await server.shutdown()
+  })
+
+  it('steers a running turn and reports which delivery each prompt received', async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), 'dsh-sdk-steer-'))
+    const ctx = await makeHarness(storageDir)
+    const started = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    class Adapter extends LlmAdapter {
+      override resolveModel(provider: string, model: string): Promise<LlmResolvedModelInfo> {
+        return Promise.resolve({ provider, id: model, name: model })
+      }
+      async * stream(): AsyncIterable<StreamChunk> {
+        started.resolve(undefined)
+        await release.promise
+        yield { type: 'block-start', index: 0, blockType: 'text' }
+        yield { type: 'text-delta', index: 0, text: 'answer' }
+        yield { type: 'block-end', index: 0, block: { type: 'text', text: 'answer' } }
+        yield { type: 'finish', reason: { kind: 'stop' } }
+      }
+    }
+    ctx.llm.registerAdapter(['mock'], new Adapter())
+    const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
+    try {
+      await server.initialize({ cwd: storageDir, provider: 'mock', model: 'mock' })
+      const first = await server.prompt({ sessionId: 'steer', contentBlocks: [{ type: 'text', text: 'start' }] })
+      await started.promise
+      const agent = ctx.agents.get(SessionId('steer'))!
+      expect(agent.status).toBe('running')
+
+      const steered = await server.prompt({
+        sessionId: 'steer', contentBlocks: [{ type: 'text', text: 'adjust' }], mode: 'steer',
+      })
+      const queued = await server.prompt({
+        sessionId: 'steer', contentBlocks: [{ type: 'text', text: 'later' }], mode: 'followup',
+      })
+      expect(steered.delivery).toBe('step')
+      expect(queued.delivery).toBe('turn')
+      expect(agent.inbox.nextStep.map(message => message.id)).toEqual([steered.messageId])
+      expect(agent.inbox.nextTurn.map(message => message.id)).toEqual([queued.messageId])
+      await expect(server.handleRequest('session/prompt', {
+        sessionId: 'steer', contentBlocks: [{ type: 'text', text: 'invalid' }], mode: 'bogus',
+      })).rejects.toThrow('session/prompt mode must be "followup" or "steer"')
+
+      release.resolve(undefined)
+      await server.wait({ sessionId: 'steer' })
+      // An idle Agent cannot hand the message to a running step, so it opens a turn.
+      const late = await server.prompt({
+        sessionId: 'steer', contentBlocks: [{ type: 'text', text: 'idle' }], mode: 'steer',
+      })
+      expect(late.delivery).toBe('turn')
+      await server.wait({ sessionId: 'steer' })
+      const delivered = agent.session.snapshotEvents()
+        .flatMap(event => event.type === 'user/message' && event.data.source.kind === 'user' ? [event.data.id] : [])
+      expect(delivered).toEqual([first.messageId, steered.messageId, queued.messageId, late.messageId])
+    } finally {
+      release.resolve(undefined)
+      await server.shutdown()
+      await ctx.fiber.dispose()
+      await rm(storageDir, { recursive: true, force: true })
+    }
+  })
+
   it('admits inline SDK images before the user message enters the session', async () => {
     const followup = vi.fn<Agent['followup']>()
     const agent = ({ id: SessionId('image'), followup } satisfies Pick<Agent, 'id' | 'followup'>) as unknown as Agent
@@ -475,6 +573,50 @@ describe('HarnessSdkJsonRpcServer', () => {
       ])
     await server.shutdown()
     await ctx.fiber.dispose()
+  })
+
+  it('wakes input parked after the last turn when the idle report arrives', async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-wake-'))
+    const ctx = await makeHarness(storageDir)
+    const adapter = new MockAdapter([textResponse('first'), textResponse('second')])
+    ctx.llm.registerAdapter(['mock'], adapter)
+    const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
+    try {
+      await server.initialize({ cwd: storageDir, provider: 'mock', model: 'mock' })
+      await server.prompt({ sessionId: 'wake', contentBlocks: [{ type: 'text', text: 'first' }] })
+      const agent = ctx.agents.get(SessionId('wake'))!
+      await agent.whenIdle()
+      agent.inject(createUserMessage({ content: [{ type: 'text', text: 'parked' }], source: { kind: 'user' } }))
+      ctx.emit('agent/status', { agent, status: 'idle' })
+      await vi.waitFor(() => { expect(adapter.requests).toHaveLength(2) })
+    } finally {
+      await server.shutdown()
+      await ctx.fiber.dispose()
+      await rm(storageDir, { recursive: true, force: true })
+    }
+  })
+
+  it('leaves a session released before its idle report settles alone', async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-wake-released-'))
+    const ctx = await makeHarness(storageDir)
+    const adapter = new MockAdapter([textResponse('first'), textResponse('second')])
+    ctx.llm.registerAdapter(['mock'], adapter)
+    const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport())
+    try {
+      await server.initialize({ cwd: storageDir, provider: 'mock', model: 'mock' })
+      await server.prompt({ sessionId: 'released', contentBlocks: [{ type: 'text', text: 'first' }] })
+      const agent = ctx.agents.get(SessionId('released'))!
+      await agent.whenIdle()
+      const wake = vi.spyOn(agent, 'wake')
+      agent.inject(createUserMessage({ content: [{ type: 'text', text: 'parked' }], source: { kind: 'user' } }))
+      ctx.emit('agent/status', { agent, status: 'idle' })
+      await server.shutdown()
+      await new Promise(resolve => setImmediate(resolve))
+      expect(wake).not.toHaveBeenCalled()
+    } finally {
+      await ctx.fiber.dispose()
+      await rm(storageDir, { recursive: true, force: true })
+    }
   })
 
   it('notifies the host when a child session is created with parent lineage', async () => {
@@ -1313,5 +1455,489 @@ describe('HarnessSdkJsonRpcServer', () => {
 
     await expect(server.shutdown()).rejects.toBe(listenerFailure)
     expect(disposed.toSorted()).toEqual(Array.from({ length: subscription }, (_, index) => index + 1))
+  })
+})
+
+/** Transport whose host-call answers the test scripts per request. */
+class ScriptedTransport implements JsonRpcTransportPeer {
+  readonly requests: { method: string; params: Record<string, unknown>; signal: AbortSignal | undefined }[] = []
+  readonly notifications: { method: string; params?: Record<string, unknown> }[] = []
+  responder: (params: Record<string, unknown>, signal: AbortSignal | undefined) => Promise<unknown> =
+    async params => { throw new Error(`unexpected host call with ${JSON.stringify(params)}`) }
+  notificationFailure: Error | undefined
+
+  async request(method: string, params: object, signal?: AbortSignal): Promise<unknown> {
+    const record = params as Record<string, unknown>
+    this.requests.push({ method, params: record, signal })
+    return this.responder(record, signal)
+  }
+
+  notify(method: string, params?: object): void {
+    this.notifications.push(params === undefined ? { method } : { method, params: params as Record<string, unknown> })
+    if (this.notificationFailure !== undefined) throw this.notificationFailure
+  }
+}
+
+async function interactionHarness(options: { approvalRequests?: boolean; userQuestions?: boolean } = {}) {
+  const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-interaction-'))
+  const ctx = await makeHarness(storageDir)
+  ctx.llm.registerAdapter(['mock'], new MockAdapter([textResponse('answer')]))
+  const transport = new ScriptedTransport()
+  const server = new HarnessSdkJsonRpcServer(ctx, transport)
+  await server.initialize({
+    cwd: storageDir,
+    provider: 'mock',
+    model: 'mock',
+    ...options.approvalRequests === undefined ? {} : { approvalRequests: options.approvalRequests },
+    ...options.userQuestions === undefined ? {} : { capabilities: { userQuestions: options.userQuestions } },
+  })
+  return {
+    ctx,
+    transport,
+    server,
+    async cleanup(): Promise<void> {
+      await server.shutdown()
+      await ctx.fiber.dispose()
+      await rm(storageDir, { recursive: true, force: true })
+    },
+  }
+}
+
+/** Run one SDK prompt so the server owns a live root Agent for `sessionId`. */
+async function startServerAgent(ctx: Context, server: HarnessSdkJsonRpcServer, sessionId = 'main'): Promise<Agent> {
+  await server.prompt({ sessionId, contentBlocks: [{ type: 'text', text: 'hello' }] })
+  await server.wait({ sessionId })
+  const agent = ctx.agents.get(SessionId(sessionId))
+  if (agent === undefined) throw new Error(`missing SDK agent ${sessionId}`)
+  return agent
+}
+
+/** Dispatch one approval request through the last-resort answerer. */
+function decideApproval(ctx: Context, request: ApprovalRequestEvent): Promise<ApprovalOutcome> {
+  return ctx.waterfall(
+    scopeTarget(request.agent, request.agent),
+    'approval/request',
+    request,
+    () => Promise.resolve<ApprovalOutcome>('unavailable'),
+  )
+}
+
+/** Dispatch one user-question request through the last-resort answerer. */
+function askQuestion(ctx: Context, request: AskUserQuestionRequestEvent): Promise<AskUserQuestionAnswer> {
+  // A request without an agent still needs an Agent-typed routing subject; the
+  // bridge ignores that key and delegates.
+  const subject = request.agent ?? ({} as Agent)
+  return ctx.waterfall(
+    scopeTarget(subject, request.agent),
+    'user-questions/request',
+    request,
+    () => Promise.resolve({ answers: [{ id: 'delegated', selected: [] }] }),
+  )
+}
+
+/** Reject the pending host call once its lifetime aborts. */
+function rejectOnAbort(_params: Record<string, unknown>, signal: AbortSignal | undefined): Promise<unknown> {
+  return new Promise((_resolve, reject) => {
+    signal?.addEventListener('abort', () => reject(new Error('host call aborted')), { once: true })
+  })
+}
+
+describe('HarnessSdkJsonRpcServer approval bridge', () => {
+  it('delegates when the host did not opt in', async () => {
+    const { ctx, transport, server, cleanup } = await interactionHarness()
+    try {
+      const agent = await startServerAgent(ctx, server)
+      await expect(decideApproval(ctx, { agent, toolName: 'write_file' })).resolves.toBe('unavailable')
+      expect(transport.requests).toEqual([])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('delegates for agents this server does not own', async () => {
+    const { ctx, transport, cleanup } = await interactionHarness({ approvalRequests: true })
+    try {
+      const foreign = await ctx.agents.create({
+        sessionId: SessionId('foreign'),
+        agentOptions: { provider: 'mock', model: 'mock' },
+      })
+      await expect(decideApproval(ctx, { agent: foreign.agent, toolName: 'write_file' })).resolves.toBe('unavailable')
+      await foreign.dispose()
+      await expect(decideApproval(ctx, { agent: foreign.agent, toolName: 'write_file' })).resolves.toBe('unavailable')
+      expect(transport.requests).toEqual([])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('asks the host for an SDK-owned root agent and returns its outcome', async () => {
+    const { ctx, transport, server, cleanup } = await interactionHarness({ approvalRequests: true })
+    try {
+      const agent = await startServerAgent(ctx, server)
+      transport.responder = async () => ({ outcome: 'allowed-once' })
+      const request: ApprovalRequestEvent = {
+        agent,
+        toolName: 'write_file',
+        callId: brandString<ToolCallId>('call-1'),
+        reason: 'needs write access',
+      }
+      await expect(decideApproval(ctx, request)).resolves.toBe('allowed-once')
+      expect(transport.requests).toHaveLength(1)
+      expect(transport.requests[0]?.method).toBe('approval/request')
+      expect(transport.requests[0]?.params).toEqual({
+        sessionId: 'main',
+        toolName: 'write_file',
+        callId: 'call-1',
+        reason: 'needs write access',
+      })
+      expect(transport.requests[0]?.signal).toBeInstanceOf(AbortSignal)
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('names the root session for a subagent descendant and honors a caller signal', async () => {
+    const { ctx, transport, server, cleanup } = await interactionHarness({ approvalRequests: true })
+    try {
+      const root = await startServerAgent(ctx, server)
+      const child = await ctx.agents.create({
+        sessionId: SessionId('child'),
+        parentAgent: root,
+        meta: { parentSession: root.session.id, origin: 'subagent' },
+        agentOptions: { provider: 'mock', model: 'mock' },
+      })
+      transport.responder = async () => ({ outcome: 'rejected' })
+      const request: ApprovalRequestEvent = {
+        agent: child.agent,
+        toolName: 'read_file',
+        signal: new AbortController().signal,
+      }
+      await expect(decideApproval(ctx, request)).resolves.toBe('rejected')
+      expect(transport.requests[0]?.params).toEqual({
+        sessionId: 'child',
+        rootSessionId: 'main',
+        toolName: 'read_file',
+      })
+      await child.dispose()
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('rejects host responses that are not an approval outcome', async () => {
+    const { ctx, transport, server, cleanup } = await interactionHarness({ approvalRequests: true })
+    try {
+      const agent = await startServerAgent(ctx, server)
+      for (const response of [null, 'allowed-once', {}, { outcome: 'unavailable' }]) {
+        transport.responder = async () => response
+        await expect(decideApproval(ctx, { agent, toolName: 'write_file' })).rejects.toThrow(
+          'approval/request response requires an allowed-once, rejected, or cancelled outcome',
+        )
+      }
+    } finally {
+      await cleanup()
+    }
+  })
+})
+
+describe('HarnessSdkJsonRpcServer user-question bridge', () => {
+  it('delegates when the client did not opt in, the request names no agent, or the agent is foreign', async () => {
+    const disabled = await interactionHarness()
+    try {
+      const agent = await startServerAgent(disabled.ctx, disabled.server)
+      await expect(askQuestion(disabled.ctx, { questions: [{ id: 'q1', question: 'Which?' }], agent }))
+        .resolves.toEqual({ answers: [{ id: 'delegated', selected: [] }] })
+      expect(disabled.transport.requests).toEqual([])
+    } finally {
+      await disabled.cleanup()
+    }
+
+    const { ctx, transport, cleanup } = await interactionHarness({ userQuestions: true })
+    try {
+      await expect(askQuestion(ctx, { questions: [{ id: 'q1', question: 'Which?' }] }))
+        .resolves.toEqual({ answers: [{ id: 'delegated', selected: [] }] })
+      const foreign = await ctx.agents.create({
+        sessionId: SessionId('foreign'),
+        agentOptions: { provider: 'mock', model: 'mock' },
+      })
+      await expect(askQuestion(ctx, { questions: [{ id: 'q1', question: 'Which?' }], agent: foreign.agent }))
+        .resolves.toEqual({ answers: [{ id: 'delegated', selected: [] }] })
+      await foreign.dispose()
+      expect(transport.requests).toEqual([])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('relays answers between the host and the waiting tool call', async () => {
+    const { ctx, transport, server, cleanup } = await interactionHarness({ userQuestions: true })
+    try {
+      const agent = await startServerAgent(ctx, server)
+      transport.responder = async () => ({ answers: [{ id: 'q1', selected: ['blue'], custom: 'teal' }] })
+      const lifetime = new AbortController()
+      const answered = await askQuestion(ctx, {
+        questions: [{ id: 'q1', question: 'Which color?' }],
+        agent,
+        signal: lifetime.signal,
+      })
+      expect(answered).toEqual({ answers: [{ id: 'q1', selected: ['blue'], custom: 'teal' }] })
+      expect(transport.requests[0]?.method).toBe('user-question/ask')
+      expect(transport.requests[0]?.params).toEqual({
+        requestId: expect.any(String),
+        sessionId: 'main',
+        questions: [{ id: 'q1', question: 'Which color?' }],
+      })
+      transport.responder = async () => ({ answers: [{ id: 'q1', selected: [] }] })
+      await expect(askQuestion(ctx, { questions: [{ id: 'q1', question: 'Which color?' }], agent }))
+        .resolves.toEqual({ answers: [{ id: 'q1', selected: [] }] })
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('rejects malformed host answers', async () => {
+    const { ctx, transport, server, cleanup } = await interactionHarness({ userQuestions: true })
+    try {
+      const agent = await startServerAgent(ctx, server)
+      const invalid: unknown[] = [
+        null,
+        'text',
+        {},
+        { answers: 'q1' },
+        { answers: [null] },
+        { answers: [{ id: 1, selected: [] }] },
+        { answers: [{ id: 'q1', selected: 'q1' }] },
+        { answers: [{ id: 'q1', selected: [1] }] },
+        { answers: [{ id: 'q1', selected: [], custom: 5 }] },
+        { answers: [] },
+        { answers: [{ id: 'q1', selected: [] }, { id: 'q1', selected: [] }] },
+        { answers: [{ id: 'unknown', selected: [] }] },
+      ]
+      for (const response of invalid) {
+        transport.responder = async () => response
+        await expect(askQuestion(ctx, { questions: [{ id: 'q1', question: 'Which?' }], agent }))
+          .rejects.toMatchObject({ name: 'UserQuestionError', code: 'BAD_ANSWER' })
+      }
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('rejects an already-cancelled request without asking the host', async () => {
+    const { ctx, transport, server, cleanup } = await interactionHarness({ userQuestions: true })
+    try {
+      const agent = await startServerAgent(ctx, server)
+      const cancelled = new AbortController()
+      cancelled.abort()
+      await expect(askQuestion(ctx, {
+        questions: [{ id: 'q1', question: 'Which?' }],
+        agent,
+        signal: cancelled.signal,
+      })).rejects.toMatchObject({ name: 'UserQuestionError', code: 'ASK_ABORTED' })
+      expect(transport.requests).toEqual([])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('reports provider failures and cancellation separately', async () => {
+    const { ctx, transport, server, cleanup } = await interactionHarness({ userQuestions: true })
+    try {
+      const agent = await startServerAgent(ctx, server)
+      transport.responder = async () => { throw new Error('host disconnected') }
+      await expect(askQuestion(ctx, { questions: [{ id: 'q1', question: 'Which?' }], agent }))
+        .rejects.toMatchObject({ name: 'UserQuestionError', code: 'PROVIDER_ERROR' })
+
+      const lifetime = new AbortController()
+      transport.responder = rejectOnAbort
+      const pending = askQuestion(ctx, {
+        questions: [{ id: 'q1', question: 'Which?' }],
+        agent,
+        signal: lifetime.signal,
+      })
+      await vi.waitFor(() => expect(transport.requests).toHaveLength(2))
+      lifetime.abort()
+      await expect(pending).rejects.toMatchObject({ name: 'UserQuestionError', code: 'ASK_ABORTED' })
+      expect(transport.notifications.filter(notification => notification.method === 'user-question.cancelled')).toEqual([
+        { method: 'user-question.cancelled', params: { requestId: expect.any(String), sessionId: 'main' } },
+      ])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('keeps the cancellation result when the host notification fails', async () => {
+    const { ctx, transport, server, cleanup } = await interactionHarness({ userQuestions: true })
+    try {
+      const agent = await startServerAgent(ctx, server)
+      const lifetime = new AbortController()
+      transport.responder = rejectOnAbort
+      transport.notificationFailure = new Error('host went away')
+      const pending = askQuestion(ctx, {
+        questions: [{ id: 'q1', question: 'Which?' }],
+        agent,
+        signal: lifetime.signal,
+      })
+      await vi.waitFor(() => expect(transport.requests).toHaveLength(1))
+      lifetime.abort()
+      await expect(pending).rejects.toMatchObject({ code: 'ASK_ABORTED' })
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('cancels pending questions when the server shuts down', async () => {
+    const { ctx, transport, server, cleanup } = await interactionHarness({ userQuestions: true })
+    try {
+      const agent = await startServerAgent(ctx, server)
+      transport.responder = rejectOnAbort
+      const pending = askQuestion(ctx, { questions: [{ id: 'q1', question: 'Which?' }], agent })
+      await vi.waitFor(() => expect(transport.requests).toHaveLength(1))
+      const rejected = expect(pending).rejects.toMatchObject({ name: 'UserQuestionError', code: 'ASK_ABORTED' })
+      await expect(server.shutdown()).resolves.toEqual({})
+      await rejected
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('rejects a non-boolean approval opt-in', async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-interaction-'))
+    const ctx = await makeHarness(storageDir)
+    const server = new HarnessSdkJsonRpcServer(ctx, new ScriptedTransport())
+    try {
+      await expect(server.initialize({
+        cwd: storageDir,
+        provider: 'mock',
+        model: 'mock',
+        // @ts-expect-error - rejects a non-boolean approval opt-in
+        approvalRequests: 'yes',
+      })).rejects.toThrow('initialize approvalRequests must be a boolean')
+    } finally {
+      await server.shutdown()
+      await ctx.fiber.dispose()
+      await rm(storageDir, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('HarnessSdkJsonRpcServer extension bridge', () => {
+  /** A server over a bare Context, with whatever extension surface `arrange` provides. */
+  async function extensionServer(arrange: (ctx: Context) => void = () => undefined) {
+    const ctx = new Context()
+    arrange(ctx)
+    const transport = new ScriptedTransport()
+    const server = new HarnessSdkJsonRpcServer(ctx, transport)
+    return {
+      ctx,
+      transport,
+      server,
+      async cleanup(): Promise<void> {
+        await server.shutdown()
+        await ctx.fiber.dispose()
+      },
+    }
+  }
+
+  it('forwards plugin notifications to the host', async () => {
+    const { ctx, transport, cleanup } = await extensionServer()
+    try {
+      ctx.emit('sdk-extensions/notify', 'account.changed', { view: 'signed-out' })
+      expect(transport.notifications).toEqual([{ method: 'account.changed', params: { view: 'signed-out' } }])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('ignores an unnamed notification and every notification after shutdown', async () => {
+    const { ctx, transport, server, cleanup } = await extensionServer()
+    try {
+      ctx.emit('sdk-extensions/notify', '', {})
+      await server.shutdown()
+      ctx.emit('sdk-extensions/notify', 'account.changed', {})
+      expect(transport.notifications).toEqual([])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('contains a notification the closed transport rejects', async () => {
+    const { ctx, transport, cleanup } = await extensionServer()
+    transport.notificationFailure = new Error('transport closed')
+    try {
+      expect(() => ctx.emit('sdk-extensions/notify', 'account.changed', {})).not.toThrow()
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('serves methods contributed through the sdkExtensions service', async () => {
+    const calls: { params: Record<string, unknown>; signal: AbortSignal }[] = []
+    const { server, cleanup } = await extensionServer((ctx) => {
+      ctx.provide('sdkExtensions', {
+        methods: () => ['account/state'],
+        resolve: method => method === 'account/state'
+          ? (params, signal) => {
+            calls.push({ params, signal })
+            return { status: 'signed-out' }
+          }
+          : undefined,
+      })
+    })
+    try {
+      await expect(server.handleRequest('account/state', { client: { locale: 'zh' } }))
+        .resolves.toEqual({ status: 'signed-out' })
+      expect(calls).toHaveLength(1)
+      expect(calls[0]?.params).toEqual({ client: { locale: 'zh' } })
+      expect(calls[0]?.signal.aborted).toBe(false)
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('reports an extension result of undefined as an empty object and defaults absent params', async () => {
+    const calls: Record<string, unknown>[] = []
+    const { server, cleanup } = await extensionServer((ctx) => {
+      ctx.provide('sdkExtensions', {
+        methods: () => ['account/tasks/running'],
+        resolve: method => method === 'account/tasks/running'
+          ? (params) => {
+            calls.push(params)
+          }
+          : undefined,
+      })
+    })
+    try {
+      await expect(server.handleRequest('account/tasks/running', undefined)).resolves.toEqual({})
+      expect(calls).toEqual([{}])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('serves methods claimed through the sdk-extensions/resolve bail event', async () => {
+    const { server, cleanup } = await extensionServer((ctx) => {
+      ctx.on('sdk-extensions/resolve', method => method === 'android/ext/list' ? async () => [] : undefined)
+    })
+    try {
+      await expect(server.handleRequest('android/ext/list', {})).resolves.toEqual([])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('settles the Loader before resolving a method no extension claims', async () => {
+    let awaited = 0
+    const { server, cleanup } = await extensionServer((ctx) => {
+      ctx.provide('loader', { await: async () => { awaited += 1 } })
+    })
+    try {
+      await expect(server.handleRequest('android/ext/list', {}))
+        .rejects
+        .toThrow('unknown DeepSeek Harness SDK runtime method: android/ext/list')
+      expect(awaited).toBe(1)
+    } finally {
+      await cleanup()
+    }
   })
 })

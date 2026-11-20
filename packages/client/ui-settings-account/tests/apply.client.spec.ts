@@ -7,7 +7,6 @@ import { createClientTest, type TestClient, webApp } from '@deepseek-ai/dsh-clie
 import type {
   AccountBonusBatch, AccountBonusOrderId, AccountDetails, AccountUserId, AccountView, SignInAttemptId,
 } from '@deepseek-ai/dsh-deepseek-account/types'
-import type { QuotaNoticeOwnerProps } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type { ThemeRuntime } from '@deepseek-ai/dsh-client-ui-theme/client'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
@@ -19,8 +18,6 @@ import type { AccountSectionInjected } from '../src/client/AccountSection.tsx'
 import { CONTACT_CONFIG_GLOBAL } from '../src/contact-config.ts'
 import { AccountPlatformHost } from '../src/client/AccountPlatformHost.tsx'
 import type { AccountPlatformHostInjected } from '../src/client/AccountPlatformHost.tsx'
-import { AccountQuotaNotice } from '../src/client/AccountQuotaNotice.tsx'
-import type { AccountQuotaNoticeInjected } from '../src/client/AccountQuotaNotice.tsx'
 
 const it = createClientTest({ roster: webApp })
 const SELF = '@deepseek-ai/dsh-client-ui-settings-account'
@@ -43,10 +40,6 @@ function bonus(orderId: string, message = 'Awarded 5.00'): AccountBonusBatch {
 function operations(c: TestClient): AccountSectionInjected {
   const injected: object = c.ctx.slots.entries('settings.launcher')[0]!.inject!()
   return injected as AccountSectionInjected
-}
-/** The account take-over registered into the Chat-owned frame-wide quota notice chain. */
-function quotaNoticeEntry(c: TestClient) {
-  return c.ctx.slots.entries('shell.quota-notice').find(entry => entry.component === AccountQuotaNotice)
 }
 /** The account feature's one shared native Platform page host. */
 function platformHostEntry(c: TestClient) {
@@ -71,24 +64,10 @@ it('registers the account launcher in a plain browser without the Desktop-only s
     await c.mock.streams.opened('account/watch', reload ? 2 : 1)
     expect(c.ctx.slots.entries('settings.launcher')).toHaveLength(1)
     expect(c.ctx.slots.entries('settings.models.sign-in')).toHaveLength(0)
-    expect(quotaNoticeEntry(c)).toBeDefined()
     expect(platformHostEntry(c)).toBeUndefined()
     expect(c.ctx.slots.entries('shell.overlay').some(entry => entry.options.id === 'desktop-onboarding')).toBe(false)
     expect(operations(c).hooks.account.getSnapshot().desktopOnboardingVisible).toBe(false)
   }
-}, 60_000)
-
-it('claims account balance notices from the frame-wide quota chain and declines generic quota', async ({ start }) => {
-  vi.stubGlobal('dshDesktop', {})
-  const c = await start()
-  const entry = quotaNoticeEntry(c)
-  expect(entry).toBeDefined()
-  const select = entry!.select! as (owner: QuotaNoticeOwnerProps) => QuotaNoticeOwnerProps | null
-  const notice: QuotaNoticeOwnerProps = {
-    code: 'ACCOUNT_QUOTA', message: 'Request quota exhausted.', dismiss: vi.fn(), keepOpen: vi.fn(() => () => {}),
-  }
-  expect(select(notice)).toBe(notice)
-  expect(select({ ...notice, code: 'QUOTA' })).toBeNull()
 }, 60_000)
 
 it('shares account actions across seats, publishes dialog ownership, and opens contextual support', async ({ start }) => {
@@ -257,7 +236,6 @@ it('keeps successful account refreshes silent and reports only failed reads', as
   const actions = operations(c)
   await actions.refreshAccount()
   c.mock.remote.account.getProfile.mockResolvedValue(ok(profile))
-  c.mock.remote.account.getBalance.mockResolvedValue(ok({ status: 'ready', value: [], bonusWallets: [] }))
   c.mock.streams.push('account/watch', stored)
   await vi.waitFor(() => { expect(actions.hooks.account.getSnapshot().details?.profile).toEqual(profile) })
   await actions.refreshAccount()
@@ -265,19 +243,17 @@ it('keeps successful account refreshes silent and reports only failed reads', as
     expect(spy.mock.calls.filter(call => String(call[0]).startsWith('[deepseek-account]'))).toEqual([])
   }
   c.mock.remote.account.getProfile.mockResolvedValueOnce(ok({ status: 'failed' }))
-  c.mock.remote.account.getBalance.mockRejectedValueOnce(new Error('private-transport-detail'))
   await actions.refreshAccount()
   expect(output).toHaveBeenCalledWith('[deepseek-account] account read failed', expect.objectContaining({
     field: 'profile',
   }))
-  expect(output).toHaveBeenCalledWith('[deepseek-account] account read failed', expect.objectContaining({
-    field: 'balance',
-  }))
+  c.mock.remote.account.getProfile.mockRejectedValueOnce(new Error('private-transport-detail'))
+  await actions.refreshAccount()
   expect(JSON.stringify(output.mock.calls)).not.toContain('private-transport-detail')
-  c.mock.remote.account.getBalance.mockResolvedValueOnce({ ok: false, error: new RemoteError('gateway/internal', 'private-rpc-detail', {}) })
+  c.mock.remote.account.getProfile.mockResolvedValueOnce({ ok: false, error: new RemoteError('gateway/internal', 'private-rpc-detail', {}) })
   await actions.refreshAccount()
   expect(output).toHaveBeenCalledWith('[deepseek-account] account read failed', expect.objectContaining({
-    field: 'balance',
+    field: 'profile',
   }))
   expect(JSON.stringify(output.mock.calls)).not.toContain('private-rpc-detail')
 }, 60_000)
@@ -288,24 +264,21 @@ it('coalesces refreshes, publishes independent failures, and rejects stale respo
   const actions = operations(c)
   const pending = Promise.withResolvers<ReturnType<typeof ok<AccountDetails['profile'] | null>>>()
   c.mock.remote.account.getProfile.mockReturnValueOnce(pending.promise)
-  c.mock.remote.account.getBalance.mockResolvedValueOnce({ ok: false, error: new RemoteError('gateway/internal', 'offline', {}) })
   c.mock.streams.push('account/watch', stored)
   await vi.waitFor(() => { expect(c.mock.remote.account.getProfile).toHaveBeenCalledOnce() })
   // Two concurrent account refreshes share the one in-flight request, so the
-  // second call adds no second read of the profile or the balance.
+  // second call adds no second read of the profile.
   const a = actions.refreshAccount()
   const concurrently = actions.refreshAccount()
   expect(c.mock.remote.account.getProfile).toHaveBeenCalledOnce()
-  expect(c.mock.remote.account.getBalance).toHaveBeenCalledOnce()
   c.mock.streams.push('account/watch', view)
   await vi.waitFor(() => { expect(actions.hooks.account.getSnapshot().view).toEqual(view) })
   pending.resolve(ok(profile))
   await Promise.all([a, concurrently])
   expect(actions.hooks.account.getSnapshot().details).toBeUndefined()
   c.mock.remote.account.getProfile.mockResolvedValueOnce({ ok: false, error: new RemoteError('gateway/internal', 'offline', {}) })
-  c.mock.remote.account.getBalance.mockRejectedValueOnce(new Error('offline'))
   c.mock.streams.push('account/watch', stored)
-  await vi.waitFor(() => { expect(actions.hooks.account.getSnapshot().details).toEqual({ profile: { status: 'failed' }, balance: { status: 'failed' } }) })
+  await vi.waitFor(() => { expect(actions.hooks.account.getSnapshot().details).toEqual({ profile: { status: 'failed' } }) })
   const pendingAgain = Promise.withResolvers<ReturnType<typeof ok<AccountDetails['profile'] | null>>>()
   c.mock.remote.account.getProfile.mockReturnValueOnce(pendingAgain.promise)
   const request = actions.refreshAccount()
@@ -366,154 +339,22 @@ it('uses the Desktop stream origin and exposes the native platform bridge', asyn
   // The native commands reach the one shared host through the account page channel.
   const host = injectedOf(platformHostEntry(c)!) as AccountPlatformHostInjected
   expect(host.platform).toBe(platform)
-  const notice = injectedOf(quotaNoticeEntry(c)!) as AccountQuotaNoticeInjected
-  // Both surfaces inject the page opener callback, not the channel object; the
-  // read policies each opener applies are asserted in their own cases.
+  // The page surface injects the opener callback, not the channel object; the
+  // read policy the opener applies is asserted in its own case.
   expect(typeof actions.openPlatformPage).toBe('function')
-  expect(typeof notice.openPlatformPage).toBe('function')
   expect('platformPages' in actions).toBe(false)
-  expect('platformPages' in notice).toBe(false)
-  expect(notice.hooks.platformPage.getSnapshot()).toBeNull()
 
-  // One surface requests a page; the viewer returning through the host's own
+  // The surface requests a page; the viewer returning through the host's own
   // close action retires that owner exactly once and clears the observable.
   const owner = vi.fn()
   actions.openPlatformPage!('usage', owner)
   expect(host.hooks.page.getSnapshot()).toEqual({ page: 'usage' })
-  expect(notice.hooks.platformPage.getSnapshot()).toEqual({ page: 'usage' })
   host.closePage()
   expect(host.hooks.page.getSnapshot()).toBeNull()
   expect(owner).toHaveBeenCalledExactlyOnceWith('returned')
   mock.remote.account.startSignIn.mockResolvedValue(ok(view))
   await actions.start()
   expect(mock.remote.account.startSignIn).toHaveBeenCalledWith(expect.objectContaining({ locale: 'en' }), 'http://localhost:9876', 'desktop')
-}, 60_000)
-
-
-it('re-reads the account when the shared host returns from top-up, and not from usage or an absent page', async ({ start, mock }) => {
-  vi.stubGlobal('dshDesktop', {})
-  const c = await start()
-  vi.stubGlobal('dshPlatform', { open: vi.fn(), setBounds: vi.fn(), close: vi.fn() })
-  await c.reload(SELF)
-  const actions = operations(c)
-  const host = injectedOf(platformHostEntry(c)!) as AccountPlatformHostInjected
-  c.mock.remote.account.getProfile.mockResolvedValue(ok(profile))
-  c.mock.remote.account.getBalance.mockResolvedValue(ok(null))
-  c.mock.remote.account.getUnnotifiedBonuses.mockResolvedValue(ok({ accountId: 'account-user' as AccountUserId, bonuses: [] }))
-  c.mock.streams.push('account/watch', stored)
-  await vi.waitFor(() => { expect(actions.hooks.account.getSnapshot().view).toEqual(stored) })
-  // The account becoming active already ran one shared refresh; measure only the
-  // reads each return triggers from here.
-  await vi.waitFor(() => { expect(c.mock.remote.account.getUnnotifiedBonuses).toHaveBeenCalled() })
-  await c.flush()
-  c.mock.remote.account.getUnnotifiedBonuses.mockClear()
-  c.mock.remote.account.getProfile.mockClear()
-
-  // Usage changes nothing the account owns, so returning from it reads nothing.
-  actions.openPlatformPage!('usage', vi.fn())
-  host.closePage()
-  await c.flush()
-  expect(mock.remote.account.getUnnotifiedBonuses).not.toHaveBeenCalled()
-
-  // Closing with no page showing is not a return, so it reads nothing either.
-  host.closePage()
-  await c.flush()
-  expect(mock.remote.account.getUnnotifiedBonuses).not.toHaveBeenCalled()
-
-  // Top up may have changed what the account holds, so its return runs the one
-  // shared refresh: the wallet reads and the unnotified-bonus read.
-  actions.openPlatformPage!('top-up', vi.fn())
-  host.closePage()
-  await vi.waitFor(() => { expect(mock.remote.account.getUnnotifiedBonuses).toHaveBeenCalledOnce() })
-  expect(mock.remote.account.getProfile).toHaveBeenCalledOnce()
-}, 60_000)
-
-it('re-reads profile and balance but no bonus for the onboarding recharge return, and nothing on supersede or release', async ({ start }) => {
-  vi.stubGlobal('dshDesktop', {})
-  const c = await start()
-  vi.stubGlobal('dshPlatform', { open: vi.fn(), setBounds: vi.fn(), close: vi.fn() })
-  await c.reload(SELF)
-  const actions = operations(c)
-  const track = vi.fn()
-  c.ctx.provide('productAnalytics', { track } as never)
-  expect(actions).not.toHaveProperty('track')
-  const onboarding = injectedOf(c.ctx.slots.entries('shell.overlay')
-    .find(entry => entry.options.id === 'desktop-onboarding')!) as DesktopOnboardingInjected
-  onboarding.track?.('onboarding_page_view', { page_name: 'onboarding_recharge' })
-  expect(track).toHaveBeenCalledWith('onboarding_page_view', { page_name: 'onboarding_recharge' })
-  const host = injectedOf(platformHostEntry(c)!) as AccountPlatformHostInjected
-  c.mock.remote.account.getProfile.mockResolvedValue(ok(profile))
-  c.mock.remote.account.getBalance.mockResolvedValue(ok(null))
-  c.mock.remote.account.getUnnotifiedBonuses.mockResolvedValue(ok({ accountId: 'account-user' as AccountUserId, bonuses: [] }))
-  c.mock.streams.push('account/watch', stored)
-  await vi.waitFor(() => { expect(actions.hooks.account.getSnapshot().view).toEqual(stored) })
-  await vi.waitFor(() => { expect(c.mock.remote.account.getUnnotifiedBonuses).toHaveBeenCalled() })
-  await c.flush()
-  const bonusesBefore = c.mock.remote.account.getUnnotifiedBonuses.mock.calls.length
-  // The account becoming active already ran the shared refresh; measure only the
-  // reads each later event triggers.
-  c.mock.remote.account.getProfile.mockClear()
-  c.mock.remote.account.getBalance.mockClear()
-
-  // A superseded page is not a return, so it reads nothing for either caller.
-  onboarding.openPlatformPage!('top-up', () => {})
-  actions.openPlatformPage!('top-up', () => {})
-  await c.flush()
-  expect(c.mock.remote.account.getProfile).not.toHaveBeenCalled()
-
-  // Releasing a request is not a return either.
-  const release = actions.openPlatformPage!('top-up', () => {})
-  release()
-  await c.flush()
-  expect(c.mock.remote.account.getProfile).not.toHaveBeenCalled()
-
-  // The onboarding return re-reads profile and balance, and never the bonus: an
-  // unseen award must not be acknowledged behind the onboarding surface.
-  onboarding.openPlatformPage!('top-up', () => {})
-  host.closePage()
-  await vi.waitFor(() => { expect(c.mock.remote.account.getProfile).toHaveBeenCalledOnce() })
-  await vi.waitFor(() => { expect(c.mock.remote.account.getBalance).toHaveBeenCalledOnce() })
-  await c.flush()
-  expect(c.mock.remote.account.getUnnotifiedBonuses.mock.calls.length).toBe(bonusesBefore)
-}, 60_000)
-
-it('waits for an in-flight pre-return read before the post-top-up read', async ({ start }) => {
-  vi.stubGlobal('dshDesktop', {})
-  const c = await start()
-  vi.stubGlobal('dshPlatform', { open: vi.fn(), setBounds: vi.fn(), close: vi.fn() })
-  await c.reload(SELF)
-  const actions = operations(c)
-  const host = injectedOf(platformHostEntry(c)!) as AccountPlatformHostInjected
-  c.mock.streams.push('account/watch', stored)
-  await vi.waitFor(() => { expect(actions.hooks.account.getSnapshot().view).toEqual(stored) })
-  await vi.waitFor(() => { expect(c.mock.remote.account.getUnnotifiedBonuses).toHaveBeenCalled() })
-  await c.flush()
-  c.mock.remote.account.getProfile.mockClear()
-  c.mock.remote.account.getBalance.mockClear()
-  c.mock.remote.account.getUnnotifiedBonuses.mockClear()
-  const pending = Promise.withResolvers<Awaited<ReturnType<typeof ok<AccountDetails['balance'] | null>>>>()
-  c.mock.remote.account.getBalance.mockReturnValueOnce(pending.promise)
-  try {
-    c.mock.streams.push('account/watch', stored)
-    await vi.waitFor(() => { expect(c.mock.remote.account.getProfile).toHaveBeenCalledOnce() })
-    // The baseline includes the frame's own notice read, which is not the return read.
-    const bonusesBeforeReturn = c.mock.remote.account.getUnnotifiedBonuses.mock.calls.length
-
-    actions.openPlatformPage!('top-up', vi.fn())
-    host.closePage()
-    await c.flush()
-    // The return read has not started: the host is still waiting on the older one.
-    expect(c.mock.remote.account.getProfile).toHaveBeenCalledOnce()
-    expect(c.mock.remote.account.getBalance).toHaveBeenCalledOnce()
-
-    pending.resolve(ok(null))
-    await vi.waitFor(() => { expect(c.mock.remote.account.getProfile).toHaveBeenCalledTimes(2) })
-    await vi.waitFor(() => { expect(c.mock.remote.account.getBalance).toHaveBeenCalledTimes(2) })
-    await vi.waitFor(() => { expect(c.mock.remote.account.getUnnotifiedBonuses.mock.calls.length).toBeGreaterThan(bonusesBeforeReturn) })
-  } finally {
-    // A failed assertion above must not strand the read the host is awaiting.
-    pending.resolve(ok(null))
-  }
 }, 60_000)
 
 it('reads the unnotified bonus in the active locale and acknowledges only after the card renders', async ({ start }) => {
@@ -599,41 +440,24 @@ it('drops the previous account notice and stops reading after sign-out', async (
   expect(c.mock.remote.account.getUnnotifiedBonuses.mock.calls.length).toBe(reads)
 }, 60_000)
 
-it('refreshes balances and the bonus read on one Settings entry, without polling', async ({ start }) => {
+it('refreshes the profile and the bonus read on one Settings entry, without polling', async ({ start }) => {
   vi.stubGlobal('dshDesktop', {})
   const c = await start()
   const actions = operations(c)
-  const balance: AccountDetails['balance'] = {
-    status: 'ready', value: [{ currency: 'CNY', balance: '12.34' }], bonusWallets: [{ currency: 'CNY', balance: '5.00' }],
-  }
-  c.mock.remote.account.getBalance.mockResolvedValue(ok(balance))
+  c.mock.remote.account.getProfile.mockResolvedValue(ok(profile))
   c.mock.remote.account.getUnnotifiedBonuses.mockResolvedValue(ok(null))
   c.mock.streams.push('account/watch', stored)
   // Signing in reads once; nothing else reads on a timer.
   await vi.waitFor(() => { expect(c.mock.remote.account.getUnnotifiedBonuses).toHaveBeenCalledTimes(1) })
   await new Promise((resolve) => { setTimeout(resolve, 20) })
   expect(c.mock.remote.account.getUnnotifiedBonuses).toHaveBeenCalledTimes(1)
-  // Signing in already read the wallet once through the details refresh.
-  const balances = c.mock.remote.account.getBalance.mock.calls.length
+  // Signing in already read the profile once through the details refresh.
+  const profiles = c.mock.remote.account.getProfile.mock.calls.length
   await actions.refreshAccount()
-  expect(c.mock.remote.account.getBalance).toHaveBeenCalledTimes(balances + 1)
+  expect(c.mock.remote.account.getProfile).toHaveBeenCalledTimes(profiles + 1)
   expect(c.mock.remote.account.getUnnotifiedBonuses).toHaveBeenCalledTimes(2)
   // The bonus read carries the active UI language.
   expect(c.mock.remote.account.getUnnotifiedBonuses).toHaveBeenLastCalledWith(expect.objectContaining({ locale: 'en' }))
-}, 60_000)
-
-it('publishes a failed balance from a Settings entry without dropping the bonus read', async ({ start }) => {
-  vi.stubGlobal('dshDesktop', {})
-  const c = await start()
-  const actions = operations(c)
-  c.mock.remote.account.getBalance.mockResolvedValueOnce({ ok: false, error: new RemoteError('gateway/internal', 'offline', {}) })
-  c.mock.remote.account.getUnnotifiedBonuses.mockResolvedValue(ok(null))
-  c.mock.streams.push('account/watch', stored)
-  await vi.waitFor(() => { expect(c.mock.remote.account.getUnnotifiedBonuses).toHaveBeenCalledTimes(1) })
-  await actions.refreshAccount()
-  expect(actions.hooks.account.getSnapshot().details?.balance).toEqual({ status: 'failed' })
-  // The bonus read still ran: a failed wallet read does not cancel it.
-  expect(c.mock.remote.account.getUnnotifiedBonuses).toHaveBeenCalledTimes(2)
 }, 60_000)
 
 it('publishes a terminal state-stream failure without mistaking it for plugin disposal', async ({ start }) => {
@@ -718,7 +542,7 @@ it('forwards live account notices and removes their subscriptions', async ({ sta
   expect(expired).toHaveBeenCalledOnce()
   expect(unavailable).toHaveBeenCalledOnce()
 })
-for (const native of [false, true]) it(`exposes desktop progress actions and disposes its subscriptions (native platform: ${native})`, async ({ start, mock }) => {
+for (const native of [false, true]) it(`exposes desktop progress actions and disposes its subscriptions (native platform: ${native})`, async ({ start }) => {
   vi.stubGlobal('dshDesktop', {})
   const platform = { open: vi.fn(), setBounds: vi.fn(), close: vi.fn() }
   if (native) vi.stubGlobal('dshPlatform', platform)
@@ -731,17 +555,15 @@ for (const native of [false, true]) it(`exposes desktop progress actions and dis
   const revealed = injected.hooks.account.getSnapshot()
   injected.setVisible(false)
   expect(injected.hooks.account.getSnapshot()).toBe(revealed)
-  // Onboarding requests the shared native page through the one host; it holds no
-  // bridge of its own.
-  if (native) expect(injected.openPlatformPage).toBeDefined()
-  else expect(injected.openPlatformPage).toBeUndefined()
-  expect(await injected.update({ step: 'credit' })).toBe(false)
+  // Onboarding holds no native bridge: only the Settings account surface opens
+  // the shared Platform page.
+  expect(injected).not.toHaveProperty('openPlatformPage')
+  expect(await injected.update({ step: 'purpose' })).toBe(false)
   expect(await injected.complete('skipped')).toBe(false)
   expect(await injected.retry()).toBe(false)
   expect(injected.hooks.onboarding.getSnapshot().visible).toBe(false)
   await c.unload(SELF)
   expect(c.ctx.slots.entries('shell.overlay').some(entry => entry.options.id === 'desktop-onboarding')).toBe(false)
-  expect(mock.remote.account.getBalance).not.toHaveBeenCalled()
 }, 60_000)
 
 it('applies API-key defaults through the desktop slot and shared configuration owners', async ({ start, mock }) => {

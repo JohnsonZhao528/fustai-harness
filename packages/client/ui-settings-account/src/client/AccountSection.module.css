@@ -9,7 +9,7 @@
 }
 
 .card,
-.balanceCard {
+.linkCard {
   padding: 12px 16px;
   border: 0.5px solid var(--dsw-alias-settings-card-stroke);
   border-radius: var(--dsw-radius-xl);
@@ -57,12 +57,11 @@
 }
 
 .status,
-.secondary,
-.unavailable {
+.secondary {
   color: var(--dsw-alias-label-tertiary);
 }
 
-.balanceCard {
+.linkCard {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -72,10 +71,6 @@
   min-height: 40px;
   padding: 6px 0;
   box-sizing: border-box;
-}
-
-.divider {
-  border-top: 0.5px solid var(--dsw-alias-border-l2);
 }
 
 .links,
@@ -116,35 +111,6 @@
 .linkButton:focus-visible {
   outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
   outline-offset: 2px;
-}
-
-/* A failed wallet read keeps its muted copy, but as a link: the user can still
-   inspect the balance on Platform through the same destination as Usage. */
-.unavailableLink {
-  color: var(--dsw-alias-label-tertiary);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-.unavailableLink:hover {
-  color: var(--dsw-alias-label-primary);
-}
-
-.unavailableLink:focus-visible {
-  outline: 2px solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
-  outline-offset: 2px;
-  border-radius: 4px;
-}
-
-.primary {
-  color: var(--dsw-alias-label-primary-foreground);
-  background: var(--dsw-alias-button-primary-fill);
-  font-weight: 500;
-  border-color: transparent;
-}
-
-.primary:hover {
-  background: var(--dsw-alias-button-primary-hover);
 }
 
 .signedOut {
@@ -194,25 +160,4 @@
   font-weight: 500;
 }
 
-.amount {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  font-size: 18px;
-  line-height: 28px;
-  font-weight: 510;
-}
-
-.amount > span + span::before {
-  content: ' + ';
-  white-space: pre;
-}
-
 .accountInfo { display: inline-flex; align-items: center; gap: 2px; flex: none; color: var(--dsw-alias-label-primary); font-size: 13px; line-height: 22px; text-decoration: none; }
-
-.bonusValue {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-}

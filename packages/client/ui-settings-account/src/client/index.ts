@@ -18,17 +18,16 @@ import { authorizeUrlWithTheme } from './authorize-url.ts'
 import { BrowserLogin } from './browser-login.ts'
 import { AccountPlatformHost, type AccountPlatformHostInjected } from './AccountPlatformHost.tsx'
 import { AccountMenu } from './AccountMenu.tsx'
-import { createPlatformPages, type PlatformPages } from './platform-pages.ts'
+import { createPlatformPages } from './platform-pages.ts'
 import { AccountSection, type AccountSnapshot, type AccountSectionInjected } from './AccountSection.tsx'
 import { createBonusNoticeController } from './bonus-notices.ts'
 import { accountClientMetadata } from './client-metadata.ts'
 import { en, zh, type AccountKey } from './locales.ts'
-import { AccountQuotaNotice, type AccountQuotaNoticeInjected } from './AccountQuotaNotice.tsx'
+import { SignInGate, type SignInGateInjected } from './SignInGate.tsx'
 import { DESKTOP_ONBOARDING_NAMESPACE, type OnboardingSettings } from '../onboarding-settings.ts'
 import { DesktopOnboardingController } from './onboarding-state.ts'
 import { DesktopOnboardingEntry, type DesktopOnboardingInjected } from './DesktopOnboardingEntry.tsx'
 import { readOnboardingApiKeyPresence } from './onboarding-credentials.ts'
-import { refreshAfterReturn } from './account-refresh.ts'
 import { AccountAvatarLoader } from './account-avatar.ts'
 export type { AccountSectionInjected, AccountSectionProps } from './AccountSection.tsx'
 export type { AccountMenuProps } from './AccountMenu.tsx'
@@ -98,19 +97,12 @@ export function apply(ctx: Context): void {
       if (value?.status === 'failed') console.error('[deepseek-account] account read failed', { field })
       if (generation === revision && value !== null) publish({ ...snapshot, details: { ...snapshot.details, [field]: value } })
     }
-    const request = Promise.all([
-      read('profile', async () => {
-        const result = await ctx.remote.account.getProfile(client())
-        if (!result.ok) throw new Error('account profile failed')
-        if (generation === revision && result.value?.status === 'ready') avatar.setUrl(result.value.value.avatarUrl)
-        return result.value
-      }),
-      read('balance', async () => {
-        const result = await ctx.remote.account.getBalance(client())
-        if (!result.ok) throw new Error('account balance failed')
-        return result.value
-      }),
-    ]).then(() => undefined)
+    const request = read('profile', async () => {
+      const result = await ctx.remote.account.getProfile(client())
+      if (!result.ok) throw new Error('account profile failed')
+      if (generation === revision && result.value?.status === 'ready') avatar.setUrl(result.value.value.avatarUrl)
+      return result.value
+    }).then(() => undefined)
     refreshing = request
     void request.finally(() => { if (refreshing === request) refreshing = undefined })
     return request
@@ -152,30 +144,18 @@ export function apply(ctx: Context): void {
   // lets an entry request one.
   const platformPages = createPlatformPages()
   ctx.effect(() => () => { platformPages.dispose() }, 'account: platform page request')
-  // One account refresh: the recharge/bonus wallet and the unnotified-bonus read,
-  // whichever surface asks — a Settings entry, or returning from top-up. Both
-  // reads are independent, and a concurrent refresh shares the in-flight request.
+  // One account refresh: the profile and the unnotified-bonus read, whichever
+  // Settings surface asks. Both reads are independent, and a concurrent refresh
+  // shares the in-flight request.
   const refreshAccount = async (): Promise<void> => {
     avatar.retry()
     await Promise.all([refresh(), notices.refresh()])
   }
-  /**
-   * Narrow the shared channel to one surface's post-return read: only a viewer
-   * returning from top-up re-reads, so a superseded page or a plugin teardown
-   * never triggers account work.
-   * @param reRead - that surface's read after a returned top-up page.
-   * @returns the opener that surface injects.
-   */
-  const platformPageOpener = (reRead: () => Promise<void>): PlatformPages['open'] =>
-    (page, onClose) => platformPages.open(page, (reason) => {
-      onClose(reason)
-      if (reason === 'returned' && page === 'top-up') void refreshAfterReturn(refreshing, reRead)
-    })
   const operations: AccountSectionInjected = {
     avatarFailed: (value) => { avatar.failed(value) },
     subscribeSessionExpired: listener => ctx.remote.$on('deepseek-account/session-expired', listener),
     subscribeModelSignInRequired: listener => ctx.remote.$on('deepseek-account/model-sign-in-required', listener),
-    ...nativePlatform === undefined ? {} : { openPlatformPage: platformPageOpener(refreshAccount) },
+    ...nativePlatform === undefined ? {} : { openPlatformPage: platformPages.open },
     refreshAccount,
     contactUs() {
       // Sample the account, build and environment before awaiting native information, so
@@ -278,23 +258,23 @@ export function apply(ctx: Context): void {
         setVisible: (visible: boolean) => {
           if (snapshot.desktopOnboardingVisible !== visible) publish({ ...snapshot, desktopOnboardingVisible: visible })
         },
-        // Onboarding's recharge return re-reads profile and balance only.
-        ...nativePlatform === undefined ? {} : { openPlatformPage: platformPageOpener(refresh) },
         update: (change: OnboardingChange) => controller.update(change),
         complete: (reason: 'completed' | 'skipped') => controller.complete(reason),
         retry: () => controller.retry(),
         track: (name, attributes) => ctx.get('productAnalytics')?.track(name, attributes),
       }),
     }, DesktopOnboardingEntry))
+  } else {
+    // A plain browser has no Welcome window, so this card covers the app until a credential is stored.
+    ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+      name: 'shell.overlay', id: 'account.sign-in-gate', locale: 'settings.account',
+      inject: (): SignInGateInjected => ({
+        hooks: { account: operations.hooks.account, theme: operations.hooks.theme },
+        start: operations.start,
+        cancel: operations.cancel,
+      }),
+    }, SignInGate))
   }
-  ctx.slots.inject('shell.quota-notice', () => ctx.slots.register({
-    name: 'shell.quota-notice', locale: 'settings.account',
-    select: owner => owner.code === 'ACCOUNT_QUOTA' ? owner : null,
-    inject: (): AccountQuotaNoticeInjected => ({
-      hooks: { account: operations.hooks.account, platformPage: platformPages },
-      ...nativePlatform === undefined ? {} : { openPlatformPage: platformPageOpener(refreshAccount) },
-    }),
-  }, AccountQuotaNotice))
   if (nativePlatform !== undefined) {
     ctx.slots.inject('shell.overlay', () => ctx.slots.register({
       name: 'shell.overlay', id: 'account.platform-page', locale: 'settings.account',

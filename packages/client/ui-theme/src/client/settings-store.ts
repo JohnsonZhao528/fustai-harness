@@ -1,10 +1,10 @@
 /**
- * Appearance and font row slot stores: mirrors of the theme service
+ * Appearance, skin, and font row slot stores: mirrors of the theme service
  * snapshot. The plugin's apply-world change listener is the only writer; the
  * row components read via props.useStore.
  */
 import { defineStore, type EngineStoreHandle } from '@deepseek-ai/dsh-client-store'
-import { DEFAULT_FONT_SIZES, type FontFamilies, type FontSizes, type ThemePreference } from '../theme-settings.ts'
+import { DEFAULT_FONT_SIZES, DEFAULT_SKIN, type FontFamilies, type FontSizes, type ThemePreference, type ThemeSkin } from '../theme-settings.ts'
 
 /** Store state mirrored from the theme snapshot. */
 export interface AppearanceRowState {
@@ -30,6 +30,36 @@ export function createAppearanceRowStore(): EngineStoreHandle<AppearanceRowState
       sync: (d, preference: ThemePreference, revision: number) => {
         if (revision <= d.revision) return
         d.preference = preference
+        d.revision = revision
+      },
+    },
+  })
+}
+
+/** Store state mirrored from the theme snapshot's skin. */
+export interface SkinRowState {
+  /** Persisted skin (selection state reads this, never any resolved palette). */
+  skin: ThemeSkin
+  /** Service revision; -1 until first sync so revision 0 lands as a change. */
+  revision: number
+}
+
+/** Declared action shape giving the exported factory a stable return type. */
+type SkinRowActions = {
+  sync: (draft: SkinRowState, skin: ThemeSkin, revision: number) => void
+}
+
+/**
+ * Declares the skin row state and write surface.
+ * @returns the store handle.
+ */
+export function createSkinRowStore(): EngineStoreHandle<SkinRowState, SkinRowActions> {
+  return defineStore({
+    init: (): SkinRowState => ({ skin: DEFAULT_SKIN, revision: -1 }),
+    actions: {
+      sync: (d, skin: ThemeSkin, revision: number) => {
+        if (revision <= d.revision) return
+        d.skin = skin
         d.revision = revision
       },
     },

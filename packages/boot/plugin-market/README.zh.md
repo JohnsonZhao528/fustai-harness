@@ -66,7 +66,7 @@ Remote 方法如下：
 <a id="understand-the-implementation"></a>
 ## 理解实现
 
-Host 使用进程的 `fetch` 获取，因此配置的出站代理生效，并拒绝重定向。响应体最多读取 `maxBytes`，随后由一个新的 Worker Thread 按严格 UTF-8 解码、解析为 JSON 并校验；相对图标引用基于配置的 URL 解析。响应体的缓冲区转移给 Worker，校验后的索引通过 structured clone 返回 Host。Worker 是自包含的 `lib/worker.cjs` bundle；销毁时终止它，Worker 失败报告为 `plugin-market/fetch-failed`。
+Host 通过 `plugin-market/fetch-response` 瀑布读取每份文档，其默认实现调用进程的 `fetch`——因此配置的出站代理生效，并拒绝重定向——监听器也可为同一 URL 的镜像作答。响应体最多读取 `maxBytes`，随后由一个新的 Worker Thread 按严格 UTF-8 解码、解析为 JSON 并校验；相对图标引用基于配置的 URL 解析。响应体的缓冲区转移给 Worker，校验后的索引通过 structured clone 返回 Host。Worker 是自包含的 `lib/worker.cjs` bundle；销毁时终止它，Worker 失败报告为 `plugin-market/fetch-failed`。
 
 对同一 URL 的并发读取共享一次获取。成功的文档缓存 `cacheTtlMs`；`refresh` 绕过缓存。每份获取到的文档都有新的 `fetchedAt`，缓存的文档在被之后的获取替换前，都可以按其 `fetchedAt` 回答。失败的读取为 `listIndexes` 记录错误消息，不保留文档。读取完成时其 URL 已不在配置中的，既不更新缓存也不更新错误。收到 `loader/volatile-update` 时，服务丢弃已移除 URL 的状态并发出 `plugin-market/changed`。销毁时中止进行中的获取。
 

@@ -5,7 +5,7 @@ import * as HostPlugin from '../src/index.ts'
 import { liveConfig, omitsGeneratedPage } from '../../../settings/settings/tests/live-config.ts'
 import { plainConfig } from '../../../settings/settings/src/schema.ts'
 import {
-  DEFAULT_PREFERENCE, Config, apply,
+  DEFAULT_PREFERENCE, DEFAULT_SKIN, Config, apply,
 } from '@deepseek-ai/dsh-client-ui-theme'
 
 
@@ -27,12 +27,13 @@ describe('ui-theme host', () => {
     const ctx = new Context()
     const configuration = await liveConfig(ctx, { Config, apply })
     const { fiber } = configuration
-    expect(plainConfig(configuration.fiber.config)).toEqual({ preference: DEFAULT_PREFERENCE, fontSize: 14, codeFontSize: 11, terminalFontSize: 13, textFontFamily: '', codeFontFamily: '', terminalFontFamily: '' })
-    await configuration.update({ preference: 'dark', fontSize: 10, codeFontSize: 16, codeFontFamily: '"Iosevka"' })
-    expect(plainConfig(configuration.fiber.config)).toEqual({ preference: 'dark', fontSize: 10, codeFontSize: 16, terminalFontSize: 13, textFontFamily: '', codeFontFamily: '"Iosevka"', terminalFontFamily: '' })
+    expect(plainConfig(configuration.fiber.config)).toEqual({ preference: DEFAULT_PREFERENCE, skin: DEFAULT_SKIN, fontSize: 14, codeFontSize: 11, terminalFontSize: 13, textFontFamily: '', codeFontFamily: '', terminalFontFamily: '' })
+    await configuration.update({ preference: 'dark', skin: 'b', fontSize: 10, codeFontSize: 16, codeFontFamily: '"Iosevka"' })
+    expect(plainConfig(configuration.fiber.config)).toEqual({ preference: 'dark', skin: 'b', fontSize: 10, codeFontSize: 16, terminalFontSize: 13, textFontFamily: '', codeFontFamily: '"Iosevka"', terminalFontFamily: '' })
     await configuration.update({ fontSize: 22 })
-    expect(plainConfig(configuration.fiber.config)).toMatchObject({ preference: 'dark', fontSize: 22 })
+    expect(plainConfig(configuration.fiber.config)).toMatchObject({ preference: 'dark', skin: 'b', fontSize: 22 })
     await expect(configuration.update({ preference: 'sepia' })).rejects.toThrow()
+    await expect(configuration.update({ skin: 'd' })).rejects.toThrow()
     await expect(configuration.update({ fontSize: 9 })).rejects.toThrow()
     await expect(configuration.update({ fontSize: 23 })).rejects.toThrow()
     await expect(configuration.update({ codeFontSize: 17 })).rejects.toThrow()
@@ -54,13 +55,17 @@ describe('ui-theme host', () => {
     expect(rows[2]).toMatchObject({ kind: 'script', placement: 'head', text: 'window.afterTheme=true' })
     expect(rowText(rows[0])).toContain('@media(prefers-color-scheme:dark)')
     expect(rowText(rows[1])).toContain('const preference = "system"')
+    expect(rowText(rows[1])).toContain('document.body.dataset.dshSkin = "a"')
+    expect(rowText(rows[0])).toContain('background-color:#f5f3ed')
     expect(rowText(rows[1])).toContain('"14px"')
     expect(rowText(rows[1])).not.toContain('--dsh-font-family')
-    await configuration.update({ preference: 'dark', fontSize: 22, terminalFontSize: 18, terminalFontFamily: 'MesloLGS NF' })
+    await configuration.update({ preference: 'dark', skin: 'b', fontSize: 22, terminalFontSize: 18, terminalFontFamily: 'MesloLGS NF' })
     expect(rowText(collect(ctx)[1])).toContain('"--dsh-terminal-font-size", "18px"')
     expect(rowText(collect(ctx)[1])).toContain('"--dsh-font-family-terminal", "\\"MesloLGS NF\\""')
     expect(rowText(collect(ctx)[0])).toContain('color-scheme:dark')
+    expect(rowText(collect(ctx)[0])).toContain('background-color:#0b0b0c')
     expect(rowText(collect(ctx)[1])).toContain('const preference = "dark"')
+    expect(rowText(collect(ctx)[1])).toContain('document.body.dataset.dshSkin = "b"')
     expect(rowText(collect(ctx)[1])).toContain('"22px"')
     await fiber.dispose()
     expect(collect(ctx)).toEqual([{ kind: 'script', placement: 'head', text: 'window.afterTheme=true' }])
