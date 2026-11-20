@@ -9,8 +9,28 @@ interface FlockBinding {
 
 let binding: FlockBinding | undefined
 
+/** Android's Node reports `'android'`, which the `NodeJS.Platform` union does not enumerate. */
+const isAndroid = (process.platform as string) === 'android'
+
 function loadBinding(): FlockBinding {
   if (binding) return binding
+  // The Android app ships the addon as `$DSH_NATIVE_DIR/libdsh_flock.so`
+  // (nativeLibraryDir); require() treats only `*.node` as native, so dlopen it.
+  if (process.env.DSH_NATIVE_DIR !== undefined || isAndroid) {
+    const nativeDir = process.env.DSH_NATIVE_DIR
+    if (nativeDir === undefined) {
+      throw Object.assign(new Error('flock on android requires DSH_NATIVE_DIR (libdsh_flock.so)'), {
+        code: 'ERR_FLOCK_UNSUPPORTED_PLATFORM',
+        syscall: 'flock',
+      })
+    }
+    // dlopen fills `exports` in place; the holder only has to satisfy its parameter type.
+    const holder = { exports: {} } as NodeModule
+    process.dlopen(holder, join(nativeDir, 'libdsh_flock.so'))
+    const loaded = holder.exports as FlockBinding
+    binding = loaded
+    return loaded
+  }
   const { platform, arch } = process
   if (platform !== 'linux' && platform !== 'darwin') {
     throw Object.assign(new Error(`flock is not supported on ${platform}-${arch}`), {
