@@ -444,4 +444,26 @@ The configured index sources changed.
 ```
 
 Source: [`packages/boot/plugin-market/src/types.ts`](../../packages/boot/plugin-market/src/types.ts)
+
+<a id="plugin-marketfetch-response--waterfall"></a>
+
+#### `plugin-market/fetch-response` — waterfall
+
+The response for one index document read. Calling `next()` performs the default `fetch`; a listener that answers for a URL itself must return a response for exactly that document and leave `next()` uncalled. A deployment that reaches the configured URL through a mirror answers here instead of configuring the mirror as a second index source.
+
+```ts cordis-catalog
+/**
+ * The response for one index document read. Calling `next()` performs the
+ * default `fetch`; a listener that answers for a URL itself must return a
+ * response for exactly that document and leave `next()` uncalled. A
+ * deployment that reaches the configured URL through a mirror answers here
+ * instead of configuring the mirror as a second index source.
+ * @param url - the configured index URL being read.
+ * @param init - the request the default fetch sends, including the abort signal and deadline.
+ * @mode waterfall
+ */
+'plugin-market/fetch-response'(url: string, init: RequestInit, next: () => Promise<Response>): Promise<Response>
+```
+
+Source: [`packages/boot/plugin-market/src/index.ts`](../../packages/boot/plugin-market/src/index.ts)
 <!-- END GENERATED cordis-surface -->

@@ -56,7 +56,7 @@ interface AgentHandle {
 
 ## Agent 句柄
 
-`Agent` 是每个插件（UI、钩子、orchestrator）面向编程的 surface；`ctx.agents.get(id)` 返回它，[发起者作用域](#initiating-agent)携带它。具体实现为 dsh-agent-loop 包内部细节；循环外没有任何组件依赖它。统一的 `send` 方法直接暴露 target 与 wakeup 路由；`followup`、`steer` 与 `inject` 是固定预设的别名方法。
+`Agent` 是每个插件（UI、钩子、orchestrator）面向编程的 surface；`ctx.agents.get(id)` 返回它，[发起者作用域](#initiating-agent)携带它。具体实现为 dsh-agent-loop 包内部细节；循环外没有任何组件依赖它。统一的 `send` 方法直接暴露 target 与 wakeup 路由；`followup`、`steer` 与 `inject` 是固定预设的别名方法，`wake` 则在不新增消息的前提下，把 idle 报告后仍滞留的输入重放为独立轮次。
 
 源码：[`packages/core/agent/src/types.ts`](../../packages/core/agent/src/types.ts)
 
@@ -142,6 +142,15 @@ interface Agent {
    * @param message - identified injected context and the source that supplied it.
    */
   inject(message: UserMessage): void
+
+  /**
+   * Start a turn for input already parked in the inbox after the driver
+   * reported `idle`, such as steering a failed turn never claimed. Unlike
+   * {@link send}, this adds no message: it replays queued work as a turn of its
+   * own. A running or maintaining driver, an empty inbox, or a disposed agent
+   * makes this a no-op, so an observer may call it on every idle report.
+   */
+  wake(): void
 }
 ```
 

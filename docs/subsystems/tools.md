@@ -530,6 +530,13 @@ presentAs(mode: ToolPresentationMode): () => void
 register(definition: ToolDefinition): () => void
 
 /**
+ * Report which Loader entry registered the most recent live tool named `name`.
+ * @param name - public tool name.
+ * @returns the owning entry, or `undefined` for an unknown tool or one registered outside a Loader entry.
+ */
+ownerOf(name: string): RegistrationOwner | undefined
+
+/**
  * Restrict global tools for the calling agent scope. Empty filters, unknown
  * names, scope-local names, and reserved transport names fail. Restrictions
  * intersect; scoped registrations remain visible.

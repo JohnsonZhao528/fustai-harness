@@ -143,6 +143,13 @@ Human-command registry. Plain-context definitions are global; definitions regist
 register(definition: CommandDefinition): () => void
 
 /**
+ * Report which Loader entry registered the most recent live command named `name`.
+ * @param name - command name without the leading slash.
+ * @returns the owning entry, or `undefined` for an unknown command or one registered outside a Loader entry.
+ */
+ownerOf(name: string): RegistrationOwner | undefined
+
+/**
  * Register the sole authority that resolves staged file receipts for command submissions.
  * @param resolver - Session-aware receipt resolver.
  * @returns disposer that removes this exact resolver.

@@ -12,7 +12,7 @@ One provider's spawn working directories, executable paths, ordinary processes, 
 
 ## Managed environment namespace and captured output
 
-`DSH_*` variables are Harness-owned child-process facts; implementations discard ambient `DSH_*` names before the caller's explicit `env` merges, so a current fact arrives only as a deliberate string entry, while an explicit `undefined` tombstone removes an ordinary ambient value. Each collected stream reports its truncation and spill-recovery state through `CollectedOutput`.
+`DSH_*` variables are Harness-owned child-process facts; implementations discard ambient `DSH_*` names before the caller's explicit `env` merges, so a current fact arrives only as a deliberate string entry, while an explicit `undefined` tombstone removes an ordinary ambient value. The one name `scrubbedParentEnv` re-declares is `DSH_HOME`, set to this process's Harness data root resolved once at the first spawn, so a child never reads or writes another account's sessions and credentials; a caller's explicit `DSH_HOME` entry still overrides it. Each collected stream reports its truncation and spill-recovery state through `CollectedOutput`.
 
 ```ts type-equiv
 /** One environment key inside the managed {@link DSH_ENV_PREFIX} namespace. */

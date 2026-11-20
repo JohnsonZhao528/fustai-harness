@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-11-10-per-account-data-roots.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-11-10-per-account-data-roots.md
+/agent-note-per-account-harness-data-roots:
+  en: fb255e39b41b9e6f
+  zh: 6822f2c0ed104168
+/agent-note-per-account-harness-data-roots/problem:
+  en: c5a559d91c250742
+  zh: ef9a1ada56d3f50b
+/agent-note-per-account-harness-data-roots/decision:
+  en: ab32e0f7ac29936d
+  zh: efef84f1c619df59
+/agent-note-per-account-harness-data-roots/alternatives-considered:
+  en: 5797c20333178fec
+  zh: f4817c4c6797a567
+/agent-note-per-account-harness-data-roots/consequences:
+  en: 553a21d11525c79c
+  zh: 4581e592bbd92457

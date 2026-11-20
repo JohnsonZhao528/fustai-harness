@@ -28,6 +28,8 @@ tmp/
 .vscode/
 .DS_Store
 交付/
+_tmp/
+_backups/
 .idea
 mise.toml
 dist-exe/

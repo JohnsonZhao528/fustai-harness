@@ -52,7 +52,7 @@ interface AgentHandle {
 
 ## The agent handle
 
-`Agent` is the surface every plugin (UI, hooks, orchestrators) programs against; `ctx.agents.get(id)` returns it, and the [initiator scope](#initiating-agent) carries it. The concrete implementation is package-internal to dsh-agent-loop; nothing outside the loop depends on it. The unified `send` method exposes target and wakeup routing directly; `followup`, `steer`, and `inject` are fixed-preset aliases.
+`Agent` is the surface every plugin (UI, hooks, orchestrators) programs against; `ctx.agents.get(id)` returns it, and the [initiator scope](#initiating-agent) carries it. The concrete implementation is package-internal to dsh-agent-loop; nothing outside the loop depends on it. The unified `send` method exposes target and wakeup routing directly; `followup`, `steer`, and `inject` are fixed-preset aliases, and `wake` replays input still parked after an idle report without adding a message.
 
 Source: [`packages/core/agent/src/types.ts`](../../packages/core/agent/src/types.ts)
 
@@ -138,6 +138,15 @@ interface Agent {
    * @param message - identified injected context and the source that supplied it.
    */
   inject(message: UserMessage): void
+
+  /**
+   * Start a turn for input already parked in the inbox after the driver
+   * reported `idle`, such as steering a failed turn never claimed. Unlike
+   * {@link send}, this adds no message: it replays queued work as a turn of its
+   * own. A running or maintaining driver, an empty inbox, or a disposed agent
+   * makes this a no-op, so an observer may call it on every idle report.
+   */
+  wake(): void
 }
 ```
 

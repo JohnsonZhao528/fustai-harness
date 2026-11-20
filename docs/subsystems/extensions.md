@@ -381,4 +381,43 @@ A pending Client activation request left the answerable state.
 ```
 
 Source: [`packages/extensions/cordis-host-runner/src/types.ts`](../../packages/extensions/cordis-host-runner/src/types.ts)
+
+<a id="sdk-extensions-events"></a>
+
+### `sdk-extensions/*` events
+
+<a id="sdk-extensionsnotify--emit"></a>
+
+#### `sdk-extensions/notify` — emit
+
+Forward a plugin-contributed notification to the SDK client.
+
+```ts cordis-catalog
+/**
+ * Forward a plugin-contributed notification to the SDK client.
+ * @param method - JSON-RPC notification method name.
+ * @param params - notification params.
+ * @mode emit
+ */
+'sdk-extensions/notify'(method: string, params: Record<string, unknown>): void
+```
+
+Source: [`packages/sdk/server/src/server.ts`](../../packages/sdk/server/src/server.ts)
+
+<a id="sdk-extensionsresolve--bail"></a>
+
+#### `sdk-extensions/resolve` — bail
+
+Claim a JSON-RPC method this server's own surface does not implement.
+
+```ts cordis-catalog
+/**
+ * Claim a JSON-RPC method this server's own surface does not implement.
+ * @param method - JSON-RPC request method name.
+ * @mode bail
+ */
+'sdk-extensions/resolve'(method: string): SdkExtensionHandler | undefined
+```
+
+Source: [`packages/sdk/server/src/server.ts`](../../packages/sdk/server/src/server.ts)
 <!-- END GENERATED cordis-surface -->
