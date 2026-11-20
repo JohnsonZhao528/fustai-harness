@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.1-alpha.4/account-sign-in-required/guide.md
+/:
+  en: fbe43b2512d474ed
+  zh: e1ef483b56690caf
+/opening-the-app-requires-a-fustai-account-sign-in:
+  en: 1ed1c6e80f169de2
+  zh: 1e7d0eee3fabb463
+/opening-the-app-requires-a-fustai-account-sign-in/change:
+  en: 757a0366d11bc1be
+  zh: 2b7c208bd6924856
+/opening-the-app-requires-a-fustai-account-sign-in/migration:
+  en: 785ec76ab9db364d
+  zh: fe3f04dcabeea8b0

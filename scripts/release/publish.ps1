@@ -61,10 +61,14 @@ $usage = [int]($usageLine | Select-Object -Last 1)
 if ($usage -gt 85) { throw "remote disk usage ${usage}% > 85%, publish aborted" }
 Write-Host "remote disk OK: ${usage}%"
 
-# 3) Upload to /tmp with version-scoped names.
-ssh -i $Key -o BatchMode=yes $SshTarget "rm -f /tmp/$ExeName /tmp/$YmlName-$Version"
+# 3) Upload to /tmp with version-scoped names. The delta blockmap is optional:
+#    without it the updater probes <file>.blockmap, gets 404, and falls back to
+#    a full download that stalls minutes first, so ship it when the build made one.
+$blockmap = Join-Path $SrcDir "$ExeName.blockmap"
+ssh -i $Key -o BatchMode=yes $SshTarget "rm -f /tmp/$ExeName /tmp/$YmlName-$Version /tmp/$ExeName.blockmap"
 scp -i $Key -o BatchMode=yes $exe "${SshTarget}:/tmp/$ExeName"
 scp -i $Key -o BatchMode=yes $yml "${SshTarget}:/tmp/$YmlName-$Version"
+if (Test-Path $blockmap) { scp -i $Key -o BatchMode=yes $blockmap "${SshTarget}:/tmp/$ExeName.blockmap" }
 
 # 4) Remote atomic placement: byte check -> exe first, yml last (a client
 #    reading the new feed must always find the referenced installer).
@@ -82,9 +86,13 @@ mv "$EXE" "$DST/__EXENAME__"
 chmod 644 "$DST/__EXENAME__"
 mv "$YML" "$DST/__YMLNAME__"
 chmod 644 "$DST/__YMLNAME__"
+if [ -f "$EXE.blockmap" ]; then
+  mv "$EXE.blockmap" "$DST/__EXENAME__.blockmap"
+  chmod 644 "$DST/__EXENAME__.blockmap"
+fi
 # prune: keep the 3 newest installers (S12.5 fallback history)
 cd "$DST"
-ls -t *.exe 2>/dev/null | tail -n +4 | xargs -r rm -f --
+ls -t *.exe 2>/dev/null | tail -n +4 | while read -r f; do rm -f -- "$f" "$f.blockmap"; done
 # static publish needs no reload, but keep the S12.3 gate for config drift
 nginx -t && systemctl reload nginx
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "https://update.fustai.com/__FEEDREL__/__YMLNAME__")

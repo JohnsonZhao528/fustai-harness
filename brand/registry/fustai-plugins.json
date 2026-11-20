@@ -5,13 +5,70 @@
     "zh": "FustAI 插件市场"
   },
   "description": {
-    "en": "Official plugin index for FustAI Harness. Publish @fustai packages to npm, then list them here.",
-    "zh": "FustAI Harness 官方插件索引。@fustai 系列包发布到 npm 后在此登记。"
+    "en": "Official plugin index for FustAI Harness. Publish @fustai packages to npm, then list them here. Entries marked Third-party install upstream packages unchanged.",
+    "zh": "FustAI Harness 官方插件索引。@fustai 系列包发布到 npm 后在此登记。标记为「第三方」的条目直接安装上游包，不做重新打包。"
   },
   "metadata": {
-    "categories": {},
-    "labels": {},
+    "categories": {
+      "remote": {
+        "title": {
+          "en": "Remote access",
+          "zh": "远程访问"
+        }
+      }
+    },
+    "labels": {
+      "third-party": {
+        "title": {
+          "en": "Third-party",
+          "zh": "第三方"
+        }
+      }
+    },
     "sortKeys": {}
   },
-  "plugins": []
+  "plugins": [
+    {
+      "name": "dsh-mobile",
+      "title": {
+        "en": "Mobile Access",
+        "zh": "移动访问"
+      },
+      "description": {
+        "en": "Continue the session running on this computer from a phone or tablet over the LAN or an encrypted tunnel, with pairing, device management, and push notifications.",
+        "zh": "在手机或平板上通过局域网或加密隧道继续使用本机上的会话，支持设备配对、设备管理与推送通知。"
+      },
+      "icon": "https://raw.githubusercontent.com/saya-ch/dsh-mobile/main/assets/brand/app-icon-rounded.svg",
+      "author": "saya-ch",
+      "homepage": "https://github.com/saya-ch/dsh-mobile",
+      "repository": {
+        "url": "https://github.com/saya-ch/dsh-mobile"
+      },
+      "metadata": {
+        "category": "remote",
+        "keywords": ["mobile", "remote-access", "lan", "pwa", "android", "ios", "tunnel", "notifications"],
+        "labels": ["third-party"]
+      },
+      "versions": [
+        {
+          "version": "0.8.2",
+          "publishTimestamp": 1793730885,
+          "source": { "type": "npm" },
+          "engines": { "dsh": ">=0.2.0" }
+        },
+        {
+          "version": "0.8.1",
+          "publishTimestamp": 1793533567,
+          "source": { "type": "npm" },
+          "engines": { "dsh": ">=0.2.0" }
+        },
+        {
+          "version": "0.8.0",
+          "publishTimestamp": 1793330210,
+          "source": { "type": "npm" },
+          "engines": { "dsh": ">=0.2.0" }
+        }
+      ]
+    }
+  ]
 }

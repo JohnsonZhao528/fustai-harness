@@ -209,6 +209,7 @@ export const SERVICE_WALK_EXEMPTIONS: Record<string, string> = {
   sidebarRight: 'client-side right-Sidebar navigation face — packages/client/ui-sidebar-right/README.md owns the API',
   sidebarRightTabs: 'client-side right-Sidebar tab-type registry — packages/client/ui-sidebar-right/README.md owns the API',
   documentPreviews: 'client-side document renderer registry — docs/subsystems/sidebar-right.md owns the API',
+  sdkExtensions: 'profile-plugin JSON-RPC method registry — packages/sdk/server/README.md owns the API',
 }
 
 /**
@@ -232,6 +233,7 @@ export const EVENT_SCOPE_PAGE: Record<string, string> = {
   'connection': 'web-server.md',
   'compaction': 'compaction.md',
   'cordis': 'extensions.md',
+  'sdk-extensions': 'extensions.md',
   'authorization': 'credentials.md',
   'credentials': 'credentials.md',
   'deepseek-account': 'credentials.md',
@@ -861,6 +863,7 @@ export const FOUNDATION_TYPE_NAMES: ReadonlySet<string> = new Set([
   'Readonly',
   'ReadonlyMap',
   'Request',
+  'RequestInit',
   'Response',
   'IncomingMessage',
   'ServerResponse',
@@ -895,6 +898,8 @@ export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
   ConsumeTokenRequest: 'event-local request contract is owned by packages/client/ui-input-trigger/src/types.ts',
   InsertTextRequest: 'event-local request contract is owned by packages/client/ui-input-trigger/src/types.ts',
   AgentHandle: 'agent ownership handle is owned by packages/core/agent/README.md',
+  SdkExtensionHandler: 'JSON-RPC extension contract is owned by packages/sdk/server/src/server.ts',
+  RegistrationOwner: 'registration owner records are owned by packages/core/tools/src/index.ts and packages/interaction/commands/src/index.ts',
   AgentPreset: 'discovered preset record is owned by packages/preset/agent-preset-registry/README.md',
   AgentPresetRoster: 'path-free preset roster is owned by packages/preset/agent-preset-registry/README.md',
   PresetDefinition: 'declarative configuration is owned by packages/preset/agent-preset/README.md',

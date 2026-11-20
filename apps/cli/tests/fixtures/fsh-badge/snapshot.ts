@@ -37,6 +37,7 @@ try {
     followup: () => {},
     steer: () => {},
     inject: () => { throw new Error('fsh-badge snapshot must receive the catalog at the step boundary') },
+    wake: () => {},
     cancel: () => {},
     runMaintenance: job => job(new AbortController().signal),
     whenIdle: () => Promise.resolve(),

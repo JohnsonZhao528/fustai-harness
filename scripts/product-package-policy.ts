@@ -47,8 +47,6 @@ export const PRODUCT_PACKAGE_POLICY: Readonly<Record<string, ProductPackagePolic
   'packages/client/web': { category: 'web-distribution', reason: 'Browser boot kernel bundled into the Web distribution.' },
   'packages/client/ui-dockkit': { category: 'web-distribution', reason: 'Layout library bundled into the Web distribution.' },
   'packages/client/ui-message-feedback': { category: 'optional', reason: 'Message feedback UI kept unmounted after the feedback feature was removed from the product.' },
-  'packages/client/ui-settings-account': { category: 'optional', reason: 'Account settings UI kept unmounted after the sign-in feature was removed from the product.' },
-  'packages/credentials/deepseek-account-platform': { category: 'optional', reason: 'Upstream account platform kept unmounted after the sign-in feature was removed from the product.' },
   'packages/host/product-telemetry-otel': { category: 'optional', reason: 'OTel product telemetry kept unmounted; the desktop distribution ships without telemetry export.' },
   'packages/identity/anonymous-user-id': { category: 'optional', reason: 'Anonymous identity kept unmounted alongside the removed telemetry.' },
   'packages/llm/llm-deepseek-account': { category: 'optional', reason: 'Account-backed model provider kept unmounted after the sign-in feature was removed from the product.' },

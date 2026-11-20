@@ -36,12 +36,12 @@ const PROJECT_NAME = '@deepseek-ai/dsh-desktop-runtime'
 const DSH_PACKAGE = '@deepseek-ai/dsh'
 const CORE_BUILD_PACKAGE = '@deepseek-ai/dsh-subprocess-local'
 const WEB_PROFILE = PROFILE_TEMPLATES.web as ProfileTemplate
-/** Shipped bundle that adds the desktop "Mobile" settings page and the mobile remote-control service. */
-const MOBILE_BUNDLE = 'dsh-mobile'
+/** Shipped bundle that registers this Desktop as a Host for FustAI Harness mobile clients. */
+const MOBILE_BUNDLE = 'ds-harness-remote'
 /** Vendored mobile plugin staged beside the runtime project metadata. */
-export const MOBILE_VENDOR_DIR = 'vendor/dsh-mobile'
-/** Bundle shipped by earlier releases; the newer {@link MOBILE_BUNDLE} replaces it. */
-const LEGACY_MOBILE_BUNDLE = 'dsh-plugin-mobile-gateway'
+export const MOBILE_VENDOR_DIR = 'vendor/ds-harness-remote'
+/** Bundles shipped by earlier releases; {@link MOBILE_BUNDLE} replaces both. */
+const LEGACY_MOBILE_BUNDLES = ['dsh-plugin-mobile-gateway', 'dsh-mobile']
 const DESKTOP_BUNDLES = [...WEB_PROFILE.bundles, MOBILE_BUNDLE]
 /** Shipped bundles copied into the profile because the loader resolves them from disk, not from `app.asar`. */
 const BUNDLED_PLUGIN_PACKAGES = [MOBILE_BUNDLE]
@@ -191,21 +191,22 @@ export function createDevelopmentProjectMetadata(projectDir: string, release: De
 }
 
 /**
- * Activate the shipped mobile bundle in a profile created by an earlier release, and retire the bundle it replaces.
- * The retired package's `file:` dependency is dropped because its vendored directory no longer ships.
+ * Activate the shipped mobile bundle in a profile created by an earlier release, and retire the bundles it replaces.
+ * The retired packages' `file:` dependencies are dropped because their vendored directories no longer ship.
  * @param projectDir - Desktop profile directory holding the profile manifest.
  */
 function enableDesktopBundles(projectDir: string): void {
   const manifest = readProfileManifest('dsh', projectDir)
   const bundles = manifest.dsh?.profile?.bundles ?? []
-  const retired = bundles.includes(LEGACY_MOBILE_BUNDLE) || manifest.dependencies?.[LEGACY_MOBILE_BUNDLE] !== undefined
-  if (!retired && (bundles.includes(MOBILE_BUNDLE) || manifest.dependencies?.[MOBILE_BUNDLE] !== undefined)) return
-  const next = bundles.filter(bundle => bundle !== LEGACY_MOBILE_BUNDLE)
+  const dependencies = manifest.dependencies ?? {}
+  const retired = LEGACY_MOBILE_BUNDLES.some(name => bundles.includes(name) || dependencies[name] !== undefined)
+  if (!retired && (bundles.includes(MOBILE_BUNDLE) || dependencies[MOBILE_BUNDLE] !== undefined)) return
+  const next = bundles.filter(bundle => !LEGACY_MOBILE_BUNDLES.includes(bundle))
   if (!next.includes(MOBILE_BUNDLE)) next.push(MOBILE_BUNDLE)
-  const dependencies = manifest.dependencies === undefined
+  const kept = manifest.dependencies === undefined
     ? undefined
-    : Object.fromEntries(Object.entries(manifest.dependencies).filter(([name]) => name !== LEGACY_MOBILE_BUNDLE))
-  writeProfileBundles(projectDir, dependencies === undefined ? manifest : { ...manifest, dependencies }, next)
+    : Object.fromEntries(Object.entries(manifest.dependencies).filter(([name]) => !LEGACY_MOBILE_BUNDLES.includes(name)))
+  writeProfileBundles(projectDir, kept === undefined ? manifest : { ...manifest, dependencies: kept }, next)
 }
 
 /**
