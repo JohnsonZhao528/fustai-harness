@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "FustAI Mobile Link",
+    "description": "Connects this computer with the FustAI mobile app under the same FustAI account, so conversations continue on this machine while sessions and files stay local.",
+    "detail": "locale/README.en.md"
+  }
+}

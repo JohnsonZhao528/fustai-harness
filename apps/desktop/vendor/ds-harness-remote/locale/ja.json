@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "FustAI モバイル接続",
+    "description": "同じ FustAI アカウントでスマートフォンとこのパソコンを接続し、会話をこのパソコンで続けます。セッションとファイルはローカルに保持されます。",
+    "detail": "locale/README.ja.md"
+  }
+}

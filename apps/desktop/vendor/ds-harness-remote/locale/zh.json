@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "FustAI 手机连接",
+    "description": "让手机与这台电脑用同一个 FustAI 账号直接互联，在工作电脑上继续对话，会话与文件不出本机。",
+    "detail": "locale/README.zh.md"
+  }
+}
